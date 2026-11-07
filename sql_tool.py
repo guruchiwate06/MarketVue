@@ -25,8 +25,8 @@ MAX_QUERY_STEPS = 50
 
 def validate_sql(sql):
     """
-    Check that the supplied query is a single,
-    read-only SELECT or WITH query.
+    Validate that the input contains one read-only
+    SELECT or WITH SQL statement.
     """
 
     if not isinstance(sql, str) or not sql.strip():
@@ -35,8 +35,7 @@ def validate_sql(sql):
     if "\x00" in sql:
         raise ValueError("SQL query contains an invalid character.")
 
-    # Skip comments at the beginning to identify
-    # the actual first SQL keyword.
+    # Remove leading whitespace and comments.
     remaining = sql.lstrip()
 
     while True:
@@ -52,13 +51,16 @@ def validate_sql(sql):
             comment_end = remaining.find("*/")
 
             if comment_end == -1:
-                raise ValueError("SQL query contains an unfinished comment.")
+                raise ValueError(
+                    "SQL query contains an unfinished comment."
+                )
 
             remaining = remaining[comment_end + 2:].lstrip()
 
         else:
             break
 
+    # Identify the first SQL keyword.
     match = re.match(r"[A-Za-z]+", remaining)
 
     if not match:
@@ -71,13 +73,28 @@ def validate_sql(sql):
             "Only SELECT and WITH queries are allowed."
         )
 
+    # Remove comments and quoted strings before checking
+    # for additional SQL statements.
+    cleaned_sql = re.sub(
+        r"/\*.*?\*/|--[^\r\n]*|'(?:''|[^'])*'|\"(?:\"\"|[^\"])*\"|`[^`]*`|\[[^\]]*\]",
+        " ",
+        sql,
+        flags=re.DOTALL
+    )
+
+    # A semicolon is allowed only at the end.
+    if ";" in cleaned_sql.rstrip().rstrip(";"):
+        raise ValueError(
+            "Multiple SQL statements are not allowed."
+        )
+
     return True
 
 
 def authorize_query(action, arg1, arg2, database_name, trigger_name):
     """
-    SQLite authorizer provides an additional security layer.
-    It allows reading approved tables but blocks modifications.
+    SQLite authorizer blocks database modifications
+    and access to tables outside the approved dataset.
     """
 
     allowed_actions = {
@@ -92,12 +109,12 @@ def authorize_query(action, arg1, arg2, database_name, trigger_name):
     if action not in allowed_actions:
         return sqlite3.SQLITE_DENY
 
-    # Prevent access to tables outside our dataset.
+    # Restrict access to the supplied project tables.
     if action == sqlite3.SQLITE_READ:
         if arg1 not in ALLOWED_TABLES:
             return sqlite3.SQLITE_DENY
 
-    # Block potentially dangerous extension or file functions.
+    # Block dangerous file and extension functions.
     if action == sqlite3.SQLITE_FUNCTION:
         function_name = (arg2 or arg1 or "").lower()
 
@@ -113,16 +130,22 @@ def authorize_query(action, arg1, arg2, database_name, trigger_name):
 
 def execute_sql(sql):
     """
-    Validate and execute a read-only SQL query.
+    Validate and execute one read-only SQL query.
 
-    Returns the SQL, column names, result rows,
-    row count and execution status.
+    Returns:
+        success
+        sql
+        columns
+        rows
+        row_count
+        truncated
+        error
     """
 
     connection = None
 
     try:
-        # Validate before opening the database.
+        # Validate the query before execution.
         validate_sql(sql)
 
         if not DB_PATH.is_file():
@@ -138,26 +161,27 @@ def execute_sql(sql):
             uri=True
         )
 
-        # Enable SQLite's query-level security checks.
+        # Apply SQLite query-level security.
         connection.set_authorizer(authorize_query)
 
-        # Stop queries that consume excessive SQLite execution steps.
+        # Limit excessive query execution.
         progress_state = {"steps": 0}
 
         def query_progress():
             progress_state["steps"] += 1
 
-            if progress_state["steps"] > MAX_QUERY_STEPS:
-                return 1
-
-            return 0
+            return (
+                1
+                if progress_state["steps"] > MAX_QUERY_STEPS
+                else 0
+            )
 
         connection.set_progress_handler(
             query_progress,
             10000
         )
 
-        # Execute exactly one SQL statement.
+        # Execute a single SQL statement.
         cursor = connection.execute(sql)
 
         columns = [
@@ -165,7 +189,7 @@ def execute_sql(sql):
             for description in cursor.description or []
         ]
 
-        # Retrieve at most MAX_ROWS + 1 to detect truncation.
+        # Fetch only the permitted number of rows.
         fetched_rows = cursor.fetchmany(MAX_ROWS + 1)
 
         truncated = len(fetched_rows) > MAX_ROWS
@@ -201,6 +225,22 @@ def execute_sql(sql):
             "row_count": 0,
             "truncated": False,
             "error": str(error)
+        }
+
+    except sqlite3.ProgrammingError as error:
+        message = str(error)
+
+        if "one statement at a time" in message.lower():
+            message = "Multiple SQL statements are not allowed."
+
+        return {
+            "success": False,
+            "sql": sql,
+            "columns": [],
+            "rows": [],
+            "row_count": 0,
+            "truncated": False,
+            "error": message
         }
 
     except sqlite3.Error as error:
@@ -252,6 +292,10 @@ if __name__ == "__main__":
         (
             "Test rejected multiple statements",
             "SELECT COUNT(*) FROM portfolios; SELECT * FROM holdings;"
+        ),
+        (
+            "Test rejected internal table access",
+            "SELECT name FROM sqlite_master;"
         )
     ]
 
