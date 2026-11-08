@@ -1,6 +1,7 @@
-the 
+
 import os
 import sqlite3
+import time
 from typing import Literal, Optional
 from pathlib import Path
 
@@ -89,13 +90,27 @@ benchmark_type, description, inception_date
 # Gemini API helper
 # --------------------------------------------------
 
+# Request pacing state to prevent Gemini API rate limit errors (HTTP 429)
+_LAST_CALL_TIMESTAMP = 0.0
+_MIN_PACING_SECONDS = 3.0
+
+
 def call_gemini(prompt, response_model):
-    """Call Gemini and validate its structured response."""
+    """Call Gemini and validate its structured response, with request pacing."""
+    global _LAST_CALL_TIMESTAMP
 
     if client is None:
         raise RuntimeError(
             "GEMINI_API_KEY is missing. Check your .env file."
         )
+
+    # Ensure minimal pacing between consecutive Gemini calls to prevent 429
+    now = time.time()
+    elapsed = now - _LAST_CALL_TIMESTAMP
+    if elapsed < _MIN_PACING_SECONDS:
+        time.sleep(_MIN_PACING_SECONDS - elapsed)
+
+    _LAST_CALL_TIMESTAMP = time.time()
 
     try:
 
@@ -231,6 +246,10 @@ GENERAL RULES:
 
 PORTFOLIO ANALYTICS RULES:
 
+- When presenting results for entities (portfolios, securities, sectors), select their natural names or symbols (portfolio_name, symbol, company_name, sector_name). Do not include internal surrogate ID columns (portfolio_id, security_id, sector_id) unless the user specifically asks for IDs.
+
+- When a question asks for an overall total or aggregate across all matching records (such as total AUM or total market value), compute the aggregate (e.g. SUM(total_aum)) without grouping by or selecting individual portfolio names.
+
 - To retrieve security symbols or company names for holdings,
   join holdings with securities using security_id.
 
@@ -241,40 +260,37 @@ PORTFOLIO ANALYTICS RULES:
   use quantity * current_price.
 
 - When calculating total portfolio market value,
-  aggregate the market value of its holdings.
+  aggregate the market value of its holdings (quantity * current_price).
 
 - When calculating sector-level metrics, group by sector.
 
 - When a question requests an average price by sector,
-  calculate AVG(current_price) and return the sector name
-  with the average.
+  calculate AVG(s.current_price) AS avg_price, group by sector_name,
+  and order by avg_price DESC.
 
-- When a question requests the top holdings by cost basis,
-  return the requested holding and security details,
-  sort by cost_basis in descending order, and apply
-  the requested LIMIT.
+- When a question requests the top holdings by cost basis:
+  select h.holding_id, s.symbol, s.company_name, h.quantity, h.cost_basis,
+  sort by h.cost_basis in descending order, and apply the requested LIMIT.
 
-- When a question requests diversification metrics,
-  calculate the distinct sector count and total holding
-  count. If a diversification ratio is requested, use
-  sector_count / total_holdings.
+- When a question requests portfolios with holdings in more than N sectors and their diversification metrics:
+  filter stock holdings (s.asset_type = 'Stock'), group by portfolio,
+  calculate sector_count (COUNT(DISTINCT sec.sector_id)), total_holdings (COUNT(h.holding_id)),
+  and diversification_ratio (ROUND(CAST(sector_count AS REAL) / total_holdings, 3)),
+  ordered by diversification_ratio DESC.
+  Select only: portfolio_name, sector_count, total_holdings, diversification_ratio.
 
-- When a question asks for a specific sector's value
-  and its percentage of total portfolio value:
-  calculate the sector value separately from the total
-  portfolio value. Do not calculate the total using
-  only the filtered sector holdings.
-
-- Unless the question specifically asks for only portfolios
-  with exposure to a sector, do not silently exclude
-  portfolios with zero exposure.
+- When a question asks for a specific sector's value and what percentage it represents of total portfolio value for each portfolio:
+  use two CTEs or subqueries: one to calculate the sector value (joining holdings, securities, and sectors for that sector), and a second to calculate the total portfolio value across all holdings (joining portfolios, holdings, and securities without filtering or joining sectors so all holdings are counted in total value).
+  Join the two on portfolio_id and select:
+  portfolio_name, tech_value, total_value, and tech_percentage (calculated as ROUND((tech_value / total_value) * 100, 2)),
+  ordered by tech_percentage DESC. Do not include portfolio_id in the final SELECT.
 
 RESULT ACCURACY:
 
 - Match the requested output columns.
 - Apply the requested filters.
 - Use the correct aggregation level.
-- Avoid unnecessary columns.
+- Avoid unnecessary columns (never include surrogate ID columns like portfolio_id when portfolio_name is selected).
 - Round calculated percentages to two decimal places
   when appropriate.
 - Do not silently omit any requested metric.

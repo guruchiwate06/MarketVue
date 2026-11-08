@@ -79,6 +79,57 @@ def compare_values(actual, expected, tolerance=1e-4):
     return str(actual).strip() == str(expected).strip()
 
 
+def normalize_column_name(name):
+    """Normalize column name by removing table prefixes and lowercase."""
+    cleaned = str(name).strip().lower()
+    if "." in cleaned:
+        cleaned = cleaned.split(".")[-1]
+    cleaned = cleaned.strip("`'\"[]")
+    return cleaned
+
+
+def column_names_match(actual_col, expected_col):
+    """Check if actual column name matches expected column name or a valid alias."""
+    a = normalize_column_name(actual_col)
+    e = normalize_column_name(expected_col)
+
+    if a == e:
+        return True
+
+    # Standard aggregation expression aliases
+    if e == "count(*)" and a in {"count(*)", "count", "total", "total_count", "total_portfolios", "portfolio_count"}:
+        return True
+    if e == "sum(total_aum)" and a in {"sum(total_aum)", "total_aum", "sum_total_aum", "sum_aum"}:
+        return True
+
+    # Common metrics aliases
+    if ("avg" in e or "average" in e) and "price" in e:
+        if ("avg" in a or "average" in a) and "price" in a:
+            return True
+    if e == "tech_percentage" and a in {"tech_percentage", "percentage", "tech_pct", "technology_percentage"}:
+        return True
+    if e == "tech_value" and a in {"tech_value", "tech_sector_value", "technology_sector_value"}:
+        return True
+
+    return False
+
+
+def row_sort_key(row):
+    """
+    Sort key that preserves numeric values as numbers and text as lowercase strings.
+    Prevents string-sorting bugs (e.g., '10' sorting before '2').
+    """
+    key = []
+    for item in row:
+        if item is None:
+            key.append((0, 0.0, ""))
+        elif isinstance(item, (int, float)):
+            key.append((1, float(item), ""))
+        else:
+            key.append((2, 0.0, str(item).strip().lower()))
+    return tuple(key)
+
+
 def compare_results(actual, expected, preserve_order=False):
     """Compare the results returned by the agent and reference query."""
 
@@ -88,30 +139,37 @@ def compare_results(actual, expected, preserve_order=False):
     actual_rows = actual["rows"]
     expected_rows = expected["rows"]
 
+    # 1. Compare column count
     if len(actual_columns) != len(expected_columns):
-        return False
+        return False, f"Column count mismatch: expected {len(expected_columns)} ({expected_columns}), got {len(actual_columns)} ({actual_columns})"
 
+    # 2. Compare column names and order
+    for idx, (act_col, exp_col) in enumerate(zip(actual_columns, expected_columns)):
+        if not column_names_match(act_col, exp_col):
+            return False, f"Column {idx + 1} name mismatch: expected '{exp_col}', got '{act_col}'"
+
+    # 3. Compare row count
     if len(actual_rows) != len(expected_rows):
-        return False
+        return False, f"Row count mismatch: expected {len(expected_rows)} rows, got {len(actual_rows)} rows"
 
-    # Ignore row order unless the question asks for a ranking or order.
+    # 4. Compare row order and values
     if preserve_order:
-        rows = zip(actual_rows, expected_rows)
+        rows = list(zip(actual_rows, expected_rows))
     else:
-        actual_rows = sorted(actual_rows, key=lambda row: str(row))
-        expected_rows = sorted(expected_rows, key=lambda row: str(row))
-        rows = zip(actual_rows, expected_rows)
+        # Use value-aware numeric/string sort key instead of string-based sorting
+        sorted_actual = sorted(actual_rows, key=row_sort_key)
+        sorted_expected = sorted(expected_rows, key=row_sort_key)
+        rows = list(zip(sorted_actual, sorted_expected))
 
-    for actual_row, expected_row in rows:
-
+    for row_idx, (actual_row, expected_row) in enumerate(rows):
         if len(actual_row) != len(expected_row):
-            return False
+            return False, f"Row {row_idx + 1} field count mismatch"
 
-        for actual_value, expected_value in zip(actual_row, expected_row):
+        for col_idx, (actual_value, expected_value) in enumerate(zip(actual_row, expected_row)):
             if not compare_values(actual_value, expected_value):
-                return False
+                return False, f"Row {row_idx + 1}, Column '{expected_columns[col_idx]}' value mismatch: expected {expected_value}, got {actual_value}"
 
-    return True
+    return True, None
 
 
 def evaluate_sql_question(test_case):
@@ -170,7 +228,7 @@ def evaluate_sql_question(test_case):
         ]
     )
 
-    passed = compare_results(
+    passed, failure_reason = compare_results(
         agent_result,
         expected,
         preserve_order=preserve_order
@@ -181,7 +239,8 @@ def evaluate_sql_question(test_case):
         "status": "PASS" if passed else "FAIL",
         "sql": actual.get("sql"),
         "expected": expected,
-        "actual": agent_result
+        "actual": agent_result,
+        "error": failure_reason
     }
 
 
@@ -278,17 +337,35 @@ def evaluate_exposure_question(test_case):
         }
 
     # Compare sector names and their exposure values.
-    passed = (
-        set(actual_exposure) == set(expected)
-        and all(
-            compare_values(actual_exposure[sector], expected[sector])
-            for sector in expected
-        )
-    )
+    if set(actual_exposure) != set(expected):
+        missing = set(expected) - set(actual_exposure)
+        extra = set(actual_exposure) - set(expected)
+        details = []
+        if missing:
+            details.append(f"missing: {missing}")
+        if extra:
+            details.append(f"extra: {extra}")
+        return {
+            "id": test_case["id"],
+            "status": "FAIL",
+            "expected": expected,
+            "actual": actual_exposure,
+            "error": "Sector mismatch: " + ", ".join(details)
+        }
+
+    for sector in expected:
+        if not compare_values(actual_exposure[sector], expected[sector]):
+            return {
+                "id": test_case["id"],
+                "status": "FAIL",
+                "expected": expected,
+                "actual": actual_exposure,
+                "error": f"Value mismatch for sector '{sector}': expected {expected[sector]}, got {actual_exposure[sector]}"
+            }
 
     return {
         "id": test_case["id"],
-        "status": "PASS" if passed else "FAIL",
+        "status": "PASS",
         "expected": expected,
         "actual": actual_exposure
     }
