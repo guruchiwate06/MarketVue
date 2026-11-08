@@ -608,6 +608,30 @@ def run_agent(question):
             "success": False,
             "error": f"Unexpected error: {error}"
         }
+
+
+# --------------------------------------------------
+# PortfolioAgent Class Wrapper (as specified in README)
+# --------------------------------------------------
+
+class PortfolioAgent:
+    """
+    Portfolio Analytics Agent class matching the README specification.
+    Allows both object-oriented usage:
+        agent = PortfolioAgent()
+        agent.answer_question(...)
+    and direct functional usage:
+        run_agent(...)
+    """
+
+    def __init__(self, db_path=None):
+        self.db_path = db_path or (Path(__file__).resolve().parent / "portfolio.db")
+
+    def answer_question(self, question: str):
+        """Answer a natural language question using the appropriate tool."""
+        return run_agent(question)
+
+
 # --------------------------------------------------
 # Command-line interface
 # --------------------------------------------------
