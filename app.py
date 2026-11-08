@@ -180,6 +180,14 @@ st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
 
 
 # --------------------------------------------------
+# Usage Limits Configuration
+# --------------------------------------------------
+
+MAX_SESSION_QUESTIONS = 10
+WARNING_THRESHOLD = 7
+
+
+# --------------------------------------------------
 # Session State Initialization
 # --------------------------------------------------
 
@@ -196,6 +204,9 @@ if "gemini_status" not in st.session_state:
     else:
         st.session_state.gemini_status = "Unconfigured (API key missing)"
 
+if "question_count" not in st.session_state:
+    st.session_state.question_count = 0
+
 
 # --------------------------------------------------
 # Sidebar: Dataset Specifications & Controls
@@ -210,6 +221,7 @@ with st.sidebar:
     st.markdown(f"  <small style='color: #64748b;'>{html.escape(db_status_msg)}</small>", unsafe_allow_html=True)
     st.markdown(f"- **AI Reasoning Service:**")
     st.markdown(f"  <small style='color: #64748b;'>{html.escape(st.session_state.gemini_status)}</small>", unsafe_allow_html=True)
+    st.markdown(f"- **Session Query Usage:** {st.session_state.question_count} / {MAX_SESSION_QUESTIONS}")
 
     if "Quota Exhausted" in st.session_state.gemini_status:
         st.warning("Gemini API free-tier quota is currently exhausted. Natural-language AI reasoning is temporarily paused; direct database queries remain operational.")
@@ -259,6 +271,25 @@ st.markdown(f"""
 
 
 # --------------------------------------------------
+# Usage Warning & Limit Notification
+# --------------------------------------------------
+
+limit_reached = st.session_state.question_count >= MAX_SESSION_QUESTIONS
+
+if limit_reached:
+    st.error(
+        f"Session limit reached: You have submitted {MAX_SESSION_QUESTIONS} of {MAX_SESSION_QUESTIONS} permitted questions for this session. "
+        "Additional AI-powered queries are disabled. All portfolio data, previous results, and dashboard features remain accessible below."
+    )
+elif st.session_state.question_count >= WARNING_THRESHOLD:
+    remaining = MAX_SESSION_QUESTIONS - st.session_state.question_count
+    st.warning(
+        f"Session usage warning: You have submitted {st.session_state.question_count} of {MAX_SESSION_QUESTIONS} questions. "
+        f"Only {remaining} question{' is' if remaining == 1 else 's are'} remaining before the session limit is reached."
+    )
+
+
+# --------------------------------------------------
 # Suggested Query Pills
 # --------------------------------------------------
 
@@ -273,19 +304,19 @@ EXAMPLES = [
     "Show the five most recent transactions."
 ]
 
-if example_col1.button(EXAMPLES[0], key="ex1", use_container_width=True):
+if example_col1.button(EXAMPLES[0], key="ex1", use_container_width=True, disabled=limit_reached):
     st.session_state.pending_question = EXAMPLES[0]
     st.rerun()
 
-if example_col2.button(EXAMPLES[1], key="ex2", use_container_width=True):
+if example_col2.button(EXAMPLES[1], key="ex2", use_container_width=True, disabled=limit_reached):
     st.session_state.pending_question = EXAMPLES[1]
     st.rerun()
 
-if example_col3.button(EXAMPLES[2], key="ex3", use_container_width=True):
+if example_col3.button(EXAMPLES[2], key="ex3", use_container_width=True, disabled=limit_reached):
     st.session_state.pending_question = EXAMPLES[2]
     st.rerun()
 
-if example_col4.button(EXAMPLES[3], key="ex4", use_container_width=True):
+if example_col4.button(EXAMPLES[3], key="ex4", use_container_width=True, disabled=limit_reached):
     st.session_state.pending_question = EXAMPLES[3]
     st.rerun()
 
@@ -295,23 +326,27 @@ if example_col4.button(EXAMPLES[3], key="ex4", use_container_width=True):
 # --------------------------------------------------
 
 with st.form(key="question_form", clear_on_submit=False):
-    default_text = st.session_state.pending_question if st.session_state.pending_question else ""
+    default_text = st.session_state.pending_question if (st.session_state.pending_question and not limit_reached) else ""
     user_query = st.text_input(
         "Enter a question regarding portfolios, holdings, risk metrics, or transactions:",
         value=default_text,
-        placeholder="e.g., Which stocks are common across the highest number of portfolios?",
-        key="query_input"
+        placeholder="e.g., Which stocks are common across the highest number of portfolios?" if not limit_reached else "Session question limit reached.",
+        key="query_input",
+        disabled=limit_reached
     )
     col_submit, _ = st.columns([1, 5])
-    submit_clicked = col_submit.form_submit_button("Ask Agent", use_container_width=True)
+    submit_clicked = col_submit.form_submit_button("Ask Agent", use_container_width=True, disabled=limit_reached)
 
 # Determine the question to process
 question_to_process = None
-if submit_clicked and user_query.strip():
-    question_to_process = user_query.strip()
-    st.session_state.pending_question = None
-elif st.session_state.pending_question:
-    question_to_process = st.session_state.pending_question
+if not limit_reached:
+    if submit_clicked and user_query.strip():
+        question_to_process = user_query.strip()
+        st.session_state.pending_question = None
+    elif st.session_state.pending_question:
+        question_to_process = st.session_state.pending_question
+        st.session_state.pending_question = None
+else:
     st.session_state.pending_question = None
 
 
@@ -320,8 +355,12 @@ elif st.session_state.pending_question:
 # --------------------------------------------------
 
 if question_to_process:
-    with st.spinner("Analyzing query and executing quantitative analysis..."):
-        agent_result = run_agent(question_to_process)
+    if st.session_state.question_count >= MAX_SESSION_QUESTIONS:
+        st.error("Session question limit reached. Additional AI-powered queries are disabled.")
+    else:
+        st.session_state.question_count += 1
+        with st.spinner("Analyzing query and executing quantitative analysis..."):
+            agent_result = run_agent(question_to_process)
         
         # Update Gemini status based on the live response
         err_type = agent_result.get("error_type")

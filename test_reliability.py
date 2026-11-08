@@ -209,5 +209,62 @@ class TestDatabaseAndSQLSecurity(unittest.TestCase):
         self.assertIn("13 funds", msg)
 
 
+class TestSessionUsageLimits(unittest.TestCase):
+    """Test session question limit logic (threshold 7 warning, threshold 10 blocking)."""
+
+    def setUp(self):
+        self.max_questions = 10
+        self.warning_threshold = 7
+
+    def test_counter_below_warning_threshold(self):
+        """Questions 0 through 6 do not trigger warning or blocking."""
+        for count in range(7):
+            warning_triggered = count >= self.warning_threshold
+            blocked = count >= self.max_questions
+            self.assertFalse(warning_triggered)
+            self.assertFalse(blocked)
+
+    def test_warning_at_question_seven_to_nine(self):
+        """Questions 7, 8, 9 trigger warning but are not blocked."""
+        for count in [7, 8, 9]:
+            warning_triggered = count >= self.warning_threshold
+            blocked = count >= self.max_questions
+            remaining = self.max_questions - count
+            self.assertTrue(warning_triggered)
+            self.assertFalse(blocked)
+            self.assertEqual(remaining, 10 - count)
+
+    def test_blocking_at_question_ten(self):
+        """At question 10, additional queries are strictly blocked."""
+        count = 10
+        blocked = count >= self.max_questions
+        self.assertTrue(blocked)
+
+    def test_execution_simulation_blocks_eleventh_query(self):
+        """Simulate submitting 10 questions and verify the 11th is rejected."""
+        session_state = {"question_count": 0, "conversation_history": []}
+        mock_agent = MagicMock(return_value={"success": True, "tool": "sql", "rows": [[1]]})
+
+        # Submit 10 queries
+        for i in range(10):
+            if session_state["question_count"] < self.max_questions:
+                session_state["question_count"] += 1
+                mock_agent(f"Question {i+1}")
+
+        self.assertEqual(session_state["question_count"], 10)
+        self.assertEqual(mock_agent.call_count, 10)
+
+        # Attempt to submit 11th query
+        attempted_eleventh = False
+        if session_state["question_count"] < self.max_questions:
+            session_state["question_count"] += 1
+            mock_agent("Question 11")
+            attempted_eleventh = True
+
+        self.assertFalse(attempted_eleventh, "11th question must not be submitted to the agent")
+        self.assertEqual(mock_agent.call_count, 10)
+        self.assertEqual(session_state["question_count"], 10)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
