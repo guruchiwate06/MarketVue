@@ -1,6 +1,6 @@
 """
-Portfolio Analytics - Streamlit Web Application
-A clean, professional interface for conversational portfolio analytics and financial analysis.
+Portfolio Analytics - Web Application
+A clean, professional interface for conversational portfolio analytics and quantitative research.
 """
 
 import os
@@ -9,12 +9,11 @@ import streamlit as st
 import pandas as pd
 
 # --------------------------------------------------
-# Page Configuration & Visual Theme
+# Page Configuration
 # --------------------------------------------------
 
 st.set_page_config(
     page_title="Portfolio Analytics",
-    page_icon="📊",
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -22,10 +21,10 @@ st.set_page_config(
 BASE_DIR = Path(__file__).resolve().parent
 
 # --------------------------------------------------
-# Deployment & Environment Secrets Support
+# Environment & Deployment Secrets Support
 # --------------------------------------------------
 
-# Support Streamlit Community Cloud secrets
+# Silently load API key from Streamlit secrets if deployed
 try:
     if "GEMINI_API_KEY" in st.secrets:
         os.environ["GEMINI_API_KEY"] = st.secrets["GEMINI_API_KEY"]
@@ -48,92 +47,99 @@ from portfolio_agent import run_agent, format_response
 
 
 # --------------------------------------------------
-# Custom Styling (Financial Services Aesthetic)
+# Custom Styling (Minimalist Institutional Aesthetic)
 # --------------------------------------------------
 
 CUSTOM_CSS = """
 <style>
-    /* Main container background and typography */
+    /* Global layout & typography */
     .main {
         background-color: #f8fafc;
         color: #0f172a;
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
     }
     
-    /* Header card */
+    /* Executive Header */
     .header-box {
-        background: linear-gradient(135deg, #0f2b48 0%, #1e3a5f 100%);
+        background: #0f2b48;
         color: #ffffff;
         padding: 1.75rem 2rem;
-        border-radius: 10px;
+        border-radius: 8px;
         margin-bottom: 1.5rem;
-        box-shadow: 0 4px 12px rgba(15, 43, 72, 0.08);
+        border-bottom: 3px solid #1e5aa8;
     }
     .header-box h1 {
         color: #ffffff;
-        margin: 0 0 0.4rem 0;
-        font-size: 2.1rem;
+        margin: 0 0 0.35rem 0;
+        font-size: 2rem;
         font-weight: 700;
         letter-spacing: -0.02em;
     }
     .header-box p {
-        color: #cbd5e1;
+        color: #94a3b8;
         margin: 0;
-        font-size: 1.05rem;
+        font-size: 1rem;
         font-weight: 400;
     }
     
-    /* Subtle status badge */
+    /* Clean status badge */
     .status-badge {
         display: inline-block;
-        background-color: rgba(255, 255, 255, 0.15);
-        color: #f1f5f9;
+        background-color: rgba(255, 255, 255, 0.08);
+        color: #e2e8f0;
         padding: 0.25rem 0.65rem;
-        border-radius: 6px;
-        font-size: 0.82rem;
+        border-radius: 4px;
+        font-size: 0.8rem;
         font-weight: 500;
         margin-top: 0.75rem;
+        border: 1px solid rgba(255, 255, 255, 0.12);
     }
 
-    /* Example questions cards */
-    .example-btn {
+    /* Analysis Callout Card */
+    .analysis-card {
         background-color: #ffffff;
         border: 1px solid #e2e8f0;
-        border-radius: 8px;
-        padding: 0.6rem 0.9rem;
-        margin-bottom: 0.5rem;
-        color: #1e3a5f;
-        font-size: 0.9rem;
-        cursor: pointer;
-        transition: all 0.2s ease;
-    }
-    .example-btn:hover {
-        background-color: #f1f5f9;
-        border-color: #cbd5e1;
-    }
-
-    /* Card styling for results */
-    .result-card {
-        background-color: #ffffff;
-        border: 1px solid #e2e8f0;
-        border-radius: 10px;
-        padding: 1.5rem;
+        border-left: 4px solid #0f2b48;
+        padding: 1rem 1.25rem;
+        border-radius: 6px;
         margin-bottom: 1.25rem;
-        box-shadow: 0 2px 6px rgba(0, 0, 0, 0.03);
+        color: #0f172a;
+        font-size: 0.95rem;
+        line-height: 1.6;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.02);
     }
-    
-    /* Metric pill */
+    .analysis-title {
+        display: block;
+        font-weight: 700;
+        color: #0f2b48;
+        font-size: 0.88rem;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        margin-bottom: 0.35rem;
+    }
+
+    /* Single Metric Pill */
     .metric-pill {
         display: inline-block;
-        background-color: #eff6ff;
-        color: #1e40af;
-        border: 1px solid #dbeafe;
-        padding: 0.35rem 0.75rem;
+        background-color: #f1f5f9;
+        color: #0f2b48;
+        border: 1px solid #cbd5e1;
+        padding: 0.4rem 0.85rem;
         border-radius: 6px;
         font-weight: 600;
-        font-size: 0.88rem;
-        margin-right: 0.5rem;
-        margin-bottom: 0.5rem;
+        font-size: 0.95rem;
+        margin-bottom: 0.75rem;
+    }
+
+    /* Clean query question title */
+    .query-header {
+        font-size: 1.15rem;
+        font-weight: 600;
+        color: #0f2b48;
+        margin-top: 1rem;
+        margin-bottom: 0.75rem;
+        padding-bottom: 0.35rem;
+        border-bottom: 1px solid #e2e8f0;
     }
 </style>
 """
@@ -153,47 +159,30 @@ if "pending_question" not in st.session_state:
 
 
 # --------------------------------------------------
-# Sidebar: Settings & System Information
+# Sidebar: Dataset Specifications & Controls
 # --------------------------------------------------
 
 with st.sidebar:
-    st.markdown("### ⚙️ System Settings")
-    
-    current_key = os.getenv("GEMINI_API_KEY", "")
-    masked_key = f"{current_key[:6]}...{current_key[-4:]}" if len(current_key) >= 12 else ("Configured" if current_key else "Missing")
-    
-    if not current_key:
-        user_key = st.text_input(
-            "Gemini API Key",
-            type="password",
-            help="Enter your Gemini API key if not set in environment or secrets."
-        )
-        if user_key:
-            os.environ["GEMINI_API_KEY"] = user_key.strip()
-            st.success("API Key updated for this session.")
-    else:
-        st.markdown(f"**Gemini API Key:** `{masked_key}`")
-    
-    st.markdown("---")
-    st.markdown("### 📁 Database Metrics")
+    st.markdown("### Portfolio Dataset")
     st.markdown("""
-    - **Portfolios:** 13 funds
-    - **Securities:** 30 equities & bonds
-    - **Sectors:** 10 GICS sectors
-    - **Price History:** 330 records
-    - **Transactions:** 24 trade logs
-    - **Performance Snapshots:** 44 months
+    - **Portfolios:** 13 Funds
+    - **Securities:** 30 Equities & Bonds
+    - **Sectors:** 10 GICS Sectors
+    - **Price History:** 330 Daily Records
+    - **Transactions:** 24 Execution Records
+    - **Performance Snapshots:** 44 Monthly Records
     """)
     
     st.markdown("---")
-    if st.button("🗑️ Clear Conversation History", use_container_width=True):
+    st.markdown("### Session Controls")
+    if st.button("Clear Session History", use_container_width=True):
         st.session_state.conversation_history = []
         st.session_state.pending_question = None
         st.rerun()
 
     st.markdown("---")
     st.markdown(
-        "<small style='color: #64748b;'>Portfolio Analytics v1.0<br>Built for quantitative and institutional analysis.</small>",
+        "<small style='color: #64748b;'>Portfolio Analytics Platform<br>Institutional Quantitative Research</small>",
         unsafe_allow_html=True
     )
 
@@ -206,16 +195,16 @@ st.markdown("""
 <div class="header-box">
     <h1>Portfolio Analytics</h1>
     <p>An intelligent assistant for portfolio insights and financial analysis.</p>
-    <div class="status-badge">● SQLite Database Connected &nbsp;|&nbsp; Gemini AI Active</div>
+    <div class="status-badge">System Status: Connected to SQLite Engine | Quantitative Reasoning Active</div>
 </div>
 """, unsafe_allow_html=True)
 
 
 # --------------------------------------------------
-# Example Questions Area
+# Suggested Query Pills
 # --------------------------------------------------
 
-st.markdown("##### Suggested Queries")
+st.markdown("**Suggested Queries**")
 
 example_col1, example_col2, example_col3, example_col4 = st.columns(4)
 
@@ -244,18 +233,18 @@ if example_col4.button(EXAMPLES[3], key="ex4", use_container_width=True):
 
 
 # --------------------------------------------------
-# Main Input Box & Ask Form
+# Main Input Box & Submission
 # --------------------------------------------------
 
 with st.form(key="question_form", clear_on_submit=False):
     default_text = st.session_state.pending_question if st.session_state.pending_question else ""
     user_query = st.text_input(
-        "Ask a question about portfolios, securities, risk metrics, or transactions:",
+        "Enter a question regarding portfolios, holdings, risk metrics, or transactions:",
         value=default_text,
-        placeholder="e.g., What are the top 5 holdings by cost basis in Growth Equity Fund?",
+        placeholder="e.g., Which stocks are common across the highest number of portfolios?",
         key="query_input"
     )
-    col_submit, col_spacer = st.columns([1, 5])
+    col_submit, _ = st.columns([1, 5])
     submit_clicked = col_submit.form_submit_button("Ask Agent", use_container_width=True)
 
 # Determine the question to process
@@ -273,7 +262,7 @@ elif st.session_state.pending_question:
 # --------------------------------------------------
 
 if question_to_process:
-    with st.spinner("Analyzing question and querying database..."):
+    with st.spinner("Analyzing query and executing quantitative analysis..."):
         agent_result = run_agent(question_to_process)
         
         # Save to session conversation history (newest at the beginning)
@@ -288,22 +277,23 @@ if question_to_process:
 # --------------------------------------------------
 
 def render_result_entry(item, is_latest=False):
-    """Render one question and its structured agent response."""
+    """Render one question and its structured agent response with executive styling."""
     question = item["question"]
     result = item["result"]
 
-    st.markdown(f"#### 💬 {question}")
+    st.markdown(f"<div class='query-header'>Query: {question}</div>", unsafe_allow_html=True)
 
     if not result:
         st.error("The agent returned no response.")
         return
 
-    # Display dynamic reasoning / analytical interpretation if available
+    # Display dynamic reasoning / analytical interpretation
     explanation = result.get("explanation")
     if explanation:
         st.markdown(f"""
-        <div style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-left: 4px solid #1e3a5f; padding: 0.9rem 1.15rem; border-radius: 6px; margin-bottom: 1rem; color: #0f172a; font-size: 0.95rem; line-height: 1.55;">
-            <strong style="color: #1e3a5f;">💡 Financial Analysis:</strong><br>{explanation}
+        <div class="analysis-card">
+            <span class="analysis-title">Executive Summary & Analysis</span>
+            {explanation}
         </div>
         """, unsafe_allow_html=True)
 
@@ -311,16 +301,15 @@ def render_result_entry(item, is_latest=False):
     if not result.get("success"):
         tool = result.get("tool")
         if tool == "unsupported":
-            reason = result.get("reason", "This question is outside the agent's capabilities.")
+            reason = result.get("reason", "This request falls outside available portfolio analytics capabilities.")
             if not explanation:
-                st.warning(f"**Unsupported Query:** {reason}")
+                st.warning(f"Scope Notice: {reason}")
         else:
-            error_msg = result.get("error", "An error occurred during processing.")
-            st.error(f"**Error Details:** {error_msg}")
+            error_msg = result.get("error", "An error occurred during query execution.")
+            st.error(f"Execution Notice: {error_msg}")
 
-        # If SQL was generated before failing, show technical details
         if result.get("sql"):
-            with st.expander("🛠️ Technical Details & Attempted SQL"):
+            with st.expander("Technical Details & Attempted SQL"):
                 st.code(result.get("sql"), language="sql")
         return
 
@@ -334,7 +323,7 @@ def render_result_entry(item, is_latest=False):
         truncated = result.get("truncated", False)
 
         if not rows:
-            st.info("The query executed successfully, but 0 matching records were found for the specified criteria.")
+            st.info("The query completed successfully. Zero records met the specified criteria.")
         else:
             # Single value display (1 column, 1 row)
             if len(columns) == 1 and len(rows) == 1:
@@ -351,15 +340,15 @@ def render_result_entry(item, is_latest=False):
                     hide_index=True
                 )
                 if truncated:
-                    st.caption("⚠️ Note: Results were truncated to the maximum limit of 1,000 rows.")
+                    st.caption("Note: Results were truncated to the maximum limit of 1,000 records.")
                 else:
                     st.caption(f"Displaying {row_count} record{'s' if row_count != 1 else ''}.")
 
         # Technical Details Expander
-        with st.expander("🛠️ Technical Details & SQL Execution"):
-            st.markdown(f"**Tool Used:** `{tool}`")
+        with st.expander("Technical Details & SQL Execution"):
+            st.markdown(f"**Tool Invoked:** `{tool}`")
             st.markdown(f"**Records Returned:** {row_count}")
-            st.markdown("**Generated SQL Query:**")
+            st.markdown("**Executed SQL Query:**")
             st.code(result.get("sql", ""), language="sql")
 
     # 2. Exposure Calculator Presentation
@@ -372,7 +361,7 @@ def render_result_entry(item, is_latest=False):
         sql_used = res_data.get("sql_query") or res_data.get("sql_used", "")
         sql_params = res_data.get("sql_parameters") or res_data.get("sql_params", {})
 
-        st.markdown(f"**Sector Exposure Breakdown for {portfolio_name}**")
+        st.markdown(f"**Sector Exposure Breakdown: {portfolio_name}**")
 
         # Metric summary
         col_m1, col_m2 = st.columns(2)
@@ -382,10 +371,10 @@ def render_result_entry(item, is_latest=False):
         # Breakdown Table
         if exposures:
             exp_list = [
-                {"Sector": sec, "Exposure Weight": f"{wt * 100:.2f}%", "Weight Value": wt}
+                {"Sector": sec, "Exposure Weight": f"{wt * 100:.2f}%"}
                 for sec, wt in sorted(exposures.items(), key=lambda x: x[1], reverse=True)
             ]
-            exp_df = pd.DataFrame(exp_list)[["Sector", "Exposure Weight"]]
+            exp_df = pd.DataFrame(exp_list)
             st.dataframe(exp_df, use_container_width=True, hide_index=True)
 
         # Raw holdings table
@@ -405,9 +394,9 @@ def render_result_entry(item, is_latest=False):
                 st.dataframe(h_df_display, use_container_width=True, hide_index=True)
 
         # Technical Details Expander
-        with st.expander("🛠️ Technical Details & Calculation Parameters"):
-            st.markdown(f"**Tool Used:** `{tool}`")
-            st.markdown(f"**Portfolio Name:** {portfolio_name} (ID: {res_data.get('portfolio_id')})")
+        with st.expander("Technical Details & Calculation Parameters"):
+            st.markdown(f"**Tool Invoked:** `{tool}`")
+            st.markdown(f"**Portfolio:** {portfolio_name} (Identifier: {res_data.get('portfolio_id')})")
             st.markdown(f"**Equity Weight Aggregation:** {total_weight:.4f}")
             if sql_used:
                 st.markdown("**Underlying Holdings Query:**")
@@ -418,12 +407,12 @@ def render_result_entry(item, is_latest=False):
 
 
 # --------------------------------------------------
-# Display Conversation History
+# Display Session History
 # --------------------------------------------------
 
 if st.session_state.conversation_history:
-    st.markdown("### 📜 Results & Session History")
+    st.markdown("### Analysis Results & History")
     for idx, item in enumerate(st.session_state.conversation_history):
         render_result_entry(item, is_latest=(idx == 0))
 else:
-    st.info("Enter a question above or select one of the suggested queries to begin.")
+    st.info("Submit a question above or select a suggested query to begin.")

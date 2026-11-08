@@ -21,7 +21,12 @@ from exposure_calculator import calculate_sector_exposure
 load_dotenv()
 
 API_KEY = os.getenv("GEMINI_API_KEY")
-MODEL_NAME = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+ACTIVE_MODELS = [
+    os.getenv("GEMINI_MODEL", "gemini-3.5-flash"),
+    "gemini-3.1-flash-lite",
+    "gemini-flash-latest"
+]
+MODEL_NAME = ACTIVE_MODELS[0]
 
 # Allow this file to be imported even if the API key is missing.
 client = genai.Client(api_key=API_KEY) if API_KEY else None
@@ -100,7 +105,7 @@ _MIN_PACING_SECONDS = 3.0
 
 
 def call_gemini(prompt, response_model):
-    """Call Gemini and validate its structured response, with request pacing and retry on transient errors."""
+    """Call Gemini and validate its structured response, with request pacing, retries, and multi-model failover."""
     global client, API_KEY, _LAST_CALL_TIMESTAMP
 
     if client is None:
@@ -112,80 +117,69 @@ def call_gemini(prompt, response_model):
                 "GEMINI_API_KEY is missing. Check your .env file or application configuration."
             )
 
-    max_retries = 3
-    for attempt in range(max_retries):
-        # Ensure minimal pacing between consecutive Gemini calls to prevent 429
-        now = time.time()
-        elapsed = now - _LAST_CALL_TIMESTAMP
-        if elapsed < _MIN_PACING_SECONDS:
-            time.sleep(_MIN_PACING_SECONDS - elapsed)
+    models_to_try = [MODEL_NAME] + [m for m in ACTIVE_MODELS if m != MODEL_NAME]
+    last_error = None
+    max_retries = 2
 
-        _LAST_CALL_TIMESTAMP = time.time()
+    for current_model in models_to_try:
+        for attempt in range(max_retries):
+            # Ensure minimal pacing between consecutive Gemini calls to prevent 429
+            now = time.time()
+            elapsed = now - _LAST_CALL_TIMESTAMP
+            if elapsed < _MIN_PACING_SECONDS:
+                time.sleep(_MIN_PACING_SECONDS - elapsed)
 
-        try:
-            response = client.models.generate_content(
-                model=MODEL_NAME,
-                contents=prompt,
-                config=types.GenerateContentConfig(
-                    response_mime_type="application/json",
-                    response_schema=response_model,
-                    temperature=0
+            _LAST_CALL_TIMESTAMP = time.time()
+
+            try:
+                response = client.models.generate_content(
+                    model=current_model,
+                    contents=prompt,
+                    config=types.GenerateContentConfig(
+                        response_mime_type="application/json",
+                        response_schema=response_model,
+                        temperature=0
+                    )
                 )
-            )
 
-            # Use the SDK's parsed response when available.
-            if response.parsed is not None:
-                return response_model.model_validate(response.parsed)
+                # Use the SDK's parsed response when available.
+                if response.parsed is not None:
+                    return response_model.model_validate(response.parsed)
 
-            # Validate JSON text if parsed output is unavailable.
-            if not response.text:
-                raise ValueError("Gemini returned an empty response.")
+                # Validate JSON text if parsed output is unavailable.
+                if not response.text:
+                    raise ValueError("Gemini returned an empty response.")
 
-            return response_model.model_validate_json(response.text)
+                return response_model.model_validate_json(response.text)
 
-        except ValidationError as error:
-            raise ValueError(
-                "Gemini returned data that did not match "
-                "the required response structure."
-            ) from error
+            except ValidationError as error:
+                raise ValueError(
+                    "Gemini returned data that did not match "
+                    "the required response structure."
+                ) from error
 
-        except ValueError:
-            raise
+            except ValueError:
+                raise
 
-        except Exception as error:
-            err_str = str(error)
-            is_quota = "RESOURCE_EXHAUSTED" in err_str or "429" in err_str
+            except Exception as error:
+                last_error = error
+                err_str = str(error)
+                is_quota = "RESOURCE_EXHAUSTED" in err_str or "429" in err_str
 
-            # If daily quota for current model is exhausted, automatically try backup model
-            if is_quota:
-                for alt_model in ["gemini-2.5-flash", "gemini-3.5-flash-lite"]:
-                    if alt_model != MODEL_NAME:
-                        try:
-                            alt_response = client.models.generate_content(
-                                model=alt_model,
-                                contents=prompt,
-                                config=types.GenerateContentConfig(
-                                    response_mime_type="application/json",
-                                    response_schema=response_model,
-                                    temperature=0
-                                )
-                            )
-                            if alt_response.parsed is not None:
-                                return response_model.model_validate(alt_response.parsed)
-                            if alt_response.text:
-                                return response_model.model_validate_json(alt_response.text)
-                        except Exception:
-                            pass
+                if is_quota:
+                    # Switch immediately to the next available model in ACTIVE_MODELS
+                    break
 
-            is_transient = "503" in err_str or "UNAVAILABLE" in err_str
-            if is_transient and attempt < max_retries - 1:
-                time.sleep(3.0 * (attempt + 1))
-                continue
+                is_transient = "503" in err_str or "UNAVAILABLE" in err_str
+                if is_transient and attempt < max_retries - 1:
+                    time.sleep(2.0 * (attempt + 1))
+                    continue
 
-            raise RuntimeError(
-                f"Gemini request failed "
-                f"({type(error).__name__}): {error}"
-            ) from error
+                break
+
+    raise RuntimeError(
+        f"Gemini request failed: {last_error}"
+    ) from last_error
 
 
 # --------------------------------------------------
