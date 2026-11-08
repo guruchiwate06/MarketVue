@@ -1,212 +1,190 @@
 # MarketView - Portfolio Analytics Agent
 
-MarketView is an AI-powered conversational portfolio analytics assistant. It translates natural language questions into secure SQL database queries and quantitative sector exposure calculations, presenting financial answers with executive reasoning.
+MarketView is an AI-powered portfolio analytics system that converts natural-language financial questions into secure SQL database queries and quantitative sector exposure calculations. It pairs structured data retrieval with dynamic financial reasoning to deliver clear, verifiable investment insights.
 
 ---
 
-## 1. About the Project
+## Architecture & System Workflow
 
-In investment management and equity research, analysts and portfolio managers constantly need to inspect fund holdings, risk metrics, asset allocations, and historical performance. Writing SQL queries manually takes time, and non-technical stakeholders often cannot write SQL at all.
+The application routes and processes user queries through a five-stage pipeline:
 
-MarketView solves this problem by allowing users to ask plain English questions about their portfolios. The agent determines whether to query the database using a security-hardened SQL engine or calculate sector exposures using an equity holding calculator, and returns both structured data and natural-language financial interpretations.
-
----
-
-## 2. Why I Built It
-
-I built this project as part of an AI Engineering take-home challenge for institutional investment research. The goal was to build a reliable, secure prototype that connects Large Language Models to local financial databases without hallucinating numbers or executing unsafe database commands.
-
-The project demonstrates:
-- How LLMs can act as intelligent database routers.
-- How to enforce read-only database sandboxing to prevent SQL injection or data corruption.
-- How to perform accurate mathematical aggregations for equity sector exposures.
-- How to provide an executive reasoning layer that explains the financial context behind numbers.
-
----
-
-## 3. How It Works
-
-When a user asks a question, MarketView processes it through a five-stage pipeline:
-
-1. **Tool Routing:** Google Gemini inspects the user question and the available portfolio names to decide which tool to call:
-   - `sql`: for database lookups, aggregations, filtering, joins, rankings, and comparisons.
-   - `exposure_calculator`: for calculating the sector breakdown of an individual portfolio.
-   - `unsupported`: for questions outside financial portfolio data.
-2. **SQL Generation (if SQL selected):** Gemini translates the question into a single read-only SQLite query adhering to the database schema.
-3. **Execution & Security Validation:**
-   - The query passes through `sql_tool.py`, which enforces a read-only SQLite connection (`?mode=ro`).
-   - A SQLite authorizer callback blocks any modification commands (`INSERT`, `UPDATE`, `DELETE`, `DROP`, `ALTER`) and prevents access to system catalogs.
-4. **Sector Exposure Calculation (if Exposure Calculator selected):**
-   - `exposure_calculator.py` extracts all holdings for the specified fund.
-   - It filters out fixed-income holdings (bonds) to focus purely on equities (`Stock`).
-   - It maps securities to GICS sectors and sums the weights to compute exact sector concentrations.
-5. **Dynamic Reasoning & Presentation:**
-   - A reasoning layer analyzes the returned records, explains the financial takeaways, and distinguishes valid zero-record results from errors.
-   - Results are rendered in clean tabular form in the web interface and command-line interface.
-
----
-
-## 4. Technologies Used
-
-- **Python 3.11+**: Core programming language.
-- **SQLite**: Local relational database engine holding 9 structured tables.
-- **Google Gemini API (`google-genai` SDK)**: Powers tool routing, SQL generation, and dynamic financial reasoning with multi-model failover (`gemini-3.5-flash`, `gemini-3.1-flash-lite`, `gemini-flash-latest`).
-- **Pydantic**: Enforces strict structured JSON schema validation on LLM responses.
-- **Streamlit**: Powers the clean, institutional web dashboard (MarketView).
-- **Pandas**: Used for tabular data formatting and CSV loading.
-- **python-dotenv**: Manages local environment variables securely.
-
----
-
-## 5. Database Architecture
-
-The local database (`portfolio.db`) is structured into nine relational tables:
-
-1. `portfolios`: 13 investment funds with names, inception dates, target risk levels, AUM, and benchmark symbols.
-2. `securities`: 30 equities and bonds with tickers, company names, asset types, sector IDs, and current market prices.
-3. `sectors`: 10 GICS industry sectors with descriptions.
-4. `holdings`: 95 portfolio holding records linking funds to securities with quantities, purchase prices, current weights, and cost bases.
-5. `transactions`: 24 trade execution logs recording BUY and SELL orders, prices, quantities, and execution dates.
-6. `historical_prices`: 330 daily price records with open, high, low, close, and volume.
-7. `portfolio_performance`: 44 monthly historical performance snapshots tracking NAV, total returns (1m, 3m, 6m, 1y), volatility, Sharpe ratio, and maximum drawdown.
-8. `risk_metrics`: 44 monthly risk calculations including Value at Risk (VaR 95/99), beta, correlation to S&P 500, and tracking error.
-9. `benchmarks`: Metadata for 13 market benchmark indices.
+```
+                          [ User Question ]
+                                 |
+                                 v
+                     +-----------------------+
+                     | Gemini Tool Router    |
+                     | (select_tool)         |
+                     +-----------------------+
+                                 |
+                 +---------------+---------------+
+                 |                               |
+                 v                               v
+    [ exposure_calculator ]                   [ sql ]
+                 |                               |
+                 v                               v
+    +-------------------------+     +-------------------------+
+    | Exposure Calculator     |     | SQL Generation          |
+    | - Identifies portfolio  |     | - Text-to-SQL via LLM   |
+    | - Filters Stock assets  |     | - Schema constraints    |
+    | - Aggregates by sector  |     +-------------------------+
+    +-------------------------+                  |
+                 |                               v
+                 |                  +-------------------------+
+                 |                  | SQL Execution Harness   |
+                 |                  | - Read-only SQLite URI  |
+                 |                  | - Authorizer hook       |
+                 |                  | - Blocks DDL / DML      |
+                 |                  +-------------------------+
+                 |                               |
+                 +---------------+---------------+
+                                 |
+                                 v
+                     +-----------------------+
+                     | Dynamic Reasoning     |
+                     | Layer                 |
+                     | - Contextualizes data |
+                     | - Explains 0-matches  |
+                     | - Distinguishes errors|
+                     +-----------------------+
+                                 |
+                                 v
+                     +-----------------------+
+                     | Executive Presentation|
+                     | (Streamlit UI / CLI)  |
+                     +-----------------------+
+```
 
 ---
 
-## 6. Project Files
+## Core Components
 
-- `app.py`: The single-page Streamlit web dashboard for MarketView.
-- `portfolio_agent.py`: Core agent coordinator handling tool routing, SQL generation, dynamic reasoning, and terminal CLI.
-- `sql_tool.py`: Secure SQL execution harness with authorizer hooks, execution step limits, and truncation handling.
-- `exposure_calculator.py`: Sector exposure engine that calculates equity allocations and excludes bonds.
-- `database.py`: Builds the SQLite database from CSV datasets and applies database indexes.
-- `database_schema.sql`: DDL schema definitions and indexes for the 9 tables.
-- `evaluate.py`: Official evaluation script testing the agent against the original 10 ground truth questions.
-- `evaluate_extended.py`: Extended evaluation script testing 30 unseen questions across 6 analytical categories.
-- `ground_truth_dataset.json`: Official benchmark dataset with 10 questions.
-- `extended_test_dataset.json`: Extended benchmark dataset with 30 validated questions.
-- `requirements.txt`: Python package dependencies.
-- `.streamlit/config.toml`: Custom theme configuration for the MarketView web dashboard.
-- `docs/PROJECT_DOCUMENTATION.md`: Comprehensive 16-section technical documentation.
-- `docs/ORIGINAL_ASSIGNMENT.md`: Archived copy of the original take-home assignment brief.
+### 1. Tool Router (`portfolio_agent.py`)
+- Analyzes natural-language queries against available portfolio names.
+- Routes queries to `sql` for database metrics, lookups, and comparisons, or to `exposure_calculator` for specific fund sector breakdowns.
+- Flags out-of-scope requests (e.g., speculative future price predictions).
+
+### 2. SQL Query Tool (`sql_tool.py`)
+- Enforces strict read-only access using SQLite connection flags (`mode=ro`).
+- Implements an authorizer callback that intercepts and rejects modification statements (`INSERT`, `UPDATE`, `DELETE`, `DROP`, `ALTER`) and blocks internal schema catalog probing.
+- Sets query execution step limits and handles row truncation at 1,000 records.
+
+### 3. Sector Exposure Calculator (`exposure_calculator.py`)
+- Calculates equity sector allocations for any designated portfolio.
+- Excludes fixed-income holdings (bonds) to compute sector weights based strictly on equity assets (`asset_type = 'Stock'`).
+- Returns holding-level audit evidence alongside sector aggregation percentages.
+
+### 4. Dynamic Reasoning Layer (`portfolio_agent.py`)
+- Dynamically interprets query outputs rather than displaying raw database rows.
+- Explains the financial significance of aggregations, rankings, and comparisons.
+- Identifies specific query conditions when zero records match, clarifying why data was not returned.
+- Built-in multi-model failover (`gemini-3.5-flash`, `gemini-3.1-flash-lite`, `gemini-flash-latest`) ensures reliable uptime against free-tier API quotas.
+
+### 5. Web Interface (`app.py`)
+- Clean, institutional dashboard styled with an executive financial palette.
+- Completely free of emojis and exposed credentials.
+- Automatic database initialization ensures cloud deployments build the SQLite database directly from source CSV files if missing.
 
 ---
 
-## 7. Installation and Setup
+## Database Schema
 
-### Prerequisites
-- Python 3.10 or higher
-- A Google Gemini API Key from Google AI Studio
+The database (`portfolio.db`) is normalized across nine tables:
 
-### Step 1: Clone the Repository
+| Table | Description | Records |
+|:---|:---|:---:|
+| `portfolios` | Portfolio metadata, AUM, risk profile, benchmark symbol | 13 |
+| `securities` | Equities and bonds, tickers, company names, current prices | 30 |
+| `sectors` | GICS sector classifications and descriptions | 10 |
+| `holdings` | Portfolio positions, quantities, purchase prices, weights, cost basis | 95 |
+| `transactions` | Historical execution records (BUY/SELL), prices, dates | 24 |
+| `historical_prices`| Daily OHLCV price history records | 330 |
+| `portfolio_performance` | Monthly snapshots of NAV, multi-period returns, volatility, Sharpe ratio, drawdown | 44 |
+| `risk_metrics` | Monthly risk figures: VaR (95/99), beta, S&P 500 correlation, tracking error | 44 |
+| `benchmarks` | Benchmark index metadata and symbols | 13 |
+
+---
+
+## Quick Start
+
+### 1. Installation
 ```bash
 git clone https://github.com/guruchiwate06/PL_Capital_Project.git
 cd PL_Capital_Project
-```
 
-### Step 2: Create and Activate a Virtual Environment
-```bash
 python -m venv venv
-
-# Windows
+# Windows:
 venv\Scripts\activate
-
-# macOS / Linux
+# macOS/Linux:
 source venv/bin/activate
-```
 
-### Step 3: Install Dependencies
-```bash
 pip install -r requirements.txt
 ```
 
-### Step 4: Configure Your API Key
+### 2. Environment Setup
 Create a `.env` file in the project root:
 ```env
-GEMINI_API_KEY=your_actual_gemini_api_key_here
+GEMINI_API_KEY=your_gemini_api_key_here
 ```
 
-### Step 5: Build the Database
+### 3. Initialize Database
 ```bash
 python database.py
 ```
-This loads the CSV files into `portfolio.db` and applies all indexes.
 
----
+### 4. Run the Application
 
-## 8. How to Use
-
-### A. Run the MarketView Web Dashboard
+**Web Dashboard (MarketView):**
 ```bash
 streamlit run app.py
 ```
-Open your browser at `http://localhost:8501`. You can click on the suggested query pills or type your own natural language questions.
+Open `http://localhost:8501` in your browser.
 
-### B. Run the Terminal Command-Line Interface
+**Command-Line Interface:**
 ```bash
 python portfolio_agent.py
 ```
-Type any question at the prompt or type `exit` to quit.
-
-### Example Questions
-- "What is the total AUM across all portfolios?"
-- "Which sector has the highest exposure in Growth Equity Fund?"
-- "Which portfolio has the highest recorded volatility?"
-- "Show the five most recent transactions."
-- "Which stocks are common across the highest number of portfolios?"
-- "Compare the average beta and tracking error between Growth Equity Fund and Conservative Income Fund."
 
 ---
 
-## 9. Testing and Evaluation
+## Evaluation & Benchmark Results
 
-The project includes two independent evaluation benchmarks:
+The system was evaluated against two independent test suites:
 
-### Official 10-Question Benchmark
+### 1. Official Ground Truth Benchmark (10 Questions)
+Tests baseline text-to-SQL generation, CTE joins, and exposure calculations.
 ```bash
 python evaluate.py
 ```
 - **Total Questions:** 10
 - **Passed:** 10
-- **Failed:** 0
 - **Accuracy:** 100.00%
-- Covers SQL lookups, aggregations, multiple CTE joins, diversification ratios, and exposure calculator breakdowns.
 
-### Extended 30-Question Benchmark
+### 2. Extended Benchmark (30 Questions)
+Tests edge cases across 6 analytical categories (Portfolio Info, Holdings, Sectors, Risk, Returns, Transactions).
 ```bash
 python evaluate_extended.py
 ```
 - **Total Questions:** 30
 - **Passed:** 26
-- **Failed:** 4
-- **Accuracy:** 86.67%
-- Evaluates 6 categories: Portfolio Information, Holdings & Securities, Sector Exposure, Risk Analysis, Performance, and Transactions.
-
-### Security and Tool Self-Tests
-```bash
-python sql_tool.py
-python exposure_calculator.py
-```
-Confirms that read-only enforcement, CTE handling, and bond-exclusion filters function properly.
+- **Accuracy:** 86.67% (Raw, unforced evaluation)
 
 ---
 
-## 10. Deployment to Streamlit Community Cloud
+## Deployment (Streamlit Community Cloud)
 
-1. Push your repository to GitHub.
-2. Sign in to [share.streamlit.io](https://share.streamlit.io).
-3. Click **New app**, select your repository and `main` branch, and set the main file path to `app.py`.
-4. Under **Settings** > **Secrets**, enter your Gemini API key:
+1. Push this repository to GitHub.
+2. Sign in to [share.streamlit.io](https://share.streamlit.io) and create a **New app**.
+3. Set the main file path to `app.py`.
+4. Add your API key in **Settings** > **Secrets**:
    ```toml
-   GEMINI_API_KEY = "your-actual-api-key"
+   GEMINI_API_KEY = "your-api-key"
    ```
-5. Click **Deploy**. The application automatically initializes `portfolio.db` on first startup from the bundled CSV datasets if the database file is not present.
+5. Deploy. The application automatically initializes `portfolio.db` from source CSV files on first launch.
 
 ---
 
-## 11. Current Limitations and Future Improvements
+## Limitations
 
-1. **Benchmark Time-Series:** The database schema tracks benchmark index names and symbols, but does not include daily historical benchmark price series. Historical outperformance relative to a benchmark cannot be computed without adding benchmark return data.
-2. **Session-Scoped Memory:** Conversation history is stored in Streamlit session state and resets on a browser refresh. Adding persistent session storage (such as SQLite-backed conversation logs) could allow multi-session tracking.
-3. **Multi-Turn Disambiguation:** If a user specifies an incomplete question without naming a fund, the router currently requests clarification. Future versions could leverage previous conversation context to infer the portfolio under discussion.
+- **Benchmark Time Series:** The database tracks benchmark symbols and metadata, but does not contain historical price series for benchmarks. Alpha and outperformance calculations require adding historical benchmark price series.
+- **Session Memory:** Conversation history is stored in Streamlit session state and clears upon browser reload.
