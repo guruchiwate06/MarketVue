@@ -21,7 +21,7 @@ from exposure_calculator import calculate_sector_exposure
 load_dotenv()
 
 API_KEY = os.getenv("GEMINI_API_KEY")
-MODEL_NAME = "gemini-3.5-flash-lite"
+MODEL_NAME = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
 
 # Allow this file to be imported even if the API key is missing.
 client = genai.Client(api_key=API_KEY) if API_KEY else None
@@ -39,6 +39,10 @@ class ToolDecision(BaseModel):
 
 class SQLResponse(BaseModel):
     sql: str
+
+
+class ReasoningResponse(BaseModel):
+    explanation: str
 
 
 # --------------------------------------------------
@@ -336,28 +340,124 @@ Generate the SQL query now.
     return result.sql.strip()
 
 # --------------------------------------------------
+# Dynamic Reasoning Layer
+# --------------------------------------------------
+
+def generate_reasoning(question, tool, status, query="", data=None):
+    """
+    Dynamically interpret the question, query/operation, and query results
+    to generate an insightful, natural-language explanation.
+    """
+    global client, API_KEY
+    if client is None and not os.getenv("GEMINI_API_KEY"):
+        return ""
+
+    data_summary = ""
+    if tool == "sql":
+        if status == "success":
+            cols = (data or {}).get("columns", [])
+            rows = (data or {}).get("rows", [])
+            row_count = (data or {}).get("row_count", len(rows))
+            if len(rows) > 10:
+                sample = rows[:10]
+                data_summary = f"Columns: {cols}\nSample Rows (10 of {row_count}): {sample}\nTotal Records: {row_count}"
+            else:
+                data_summary = f"Columns: {cols}\nRows: {rows}\nTotal Records: {row_count}"
+        elif status == "empty_result":
+            data_summary = "Zero records returned matching the query criteria."
+        elif status == "sql_error":
+            data_summary = f"Execution error: {(data or {}).get('error', 'Database execution failed')}"
+
+    elif tool == "exposure_calculator":
+        if status == "success":
+            p_name = (data or {}).get("portfolio_name", "Portfolio")
+            exposures = (data or {}).get("sector_exposure", {})
+            total_weight = (data or {}).get("total_equity_weight", 0.0)
+            raw_count = len((data or {}).get("raw_holdings", []))
+            data_summary = (
+                f"Portfolio: {p_name}\n"
+                f"Sector Exposures: {exposures}\n"
+                f"Total Equity Weight: {total_weight * 100:.2f}%\n"
+                f"Stock Holdings Count: {raw_count}"
+            )
+        else:
+            data_summary = f"Calculation error: {(data or {}).get('error', 'Calculation failed')}"
+
+    elif tool == "unsupported":
+        data_summary = f"Reason: {(data or {}).get('reason', 'Query outside application capabilities')}"
+
+    prompt = f"""
+You are a quantitative portfolio research analyst.
+Interpret the user's question, the executed query or operation, and the returned data.
+Provide a clear, natural-language explanation and conclusion (2 to 4 sentences).
+
+USER QUESTION:
+{question}
+
+EXECUTION CONTEXT:
+- Tool Used: {tool}
+- Query / Operation:
+{query if query else 'N/A'}
+- Execution Status: {status}
+- Result Data:
+{data_summary}
+
+DATABASE SCHEMA REFERENCE:
+{DATABASE_SCHEMA}
+
+REASONING GUIDELINES:
+1. Direct Answer: Answer the user's question directly with the key figures, names, or outcomes found in the result data.
+2. Contextual Interpretation:
+   - For aggregations/metrics (e.g. AUM, average beta, volatility): State the figure clearly and interpret what it signifies.
+   - For comparisons/rankings: Highlight the leading entity, relative positions, or differences between compared portfolios/securities.
+   - For sector breakdowns: Summarize the primary sector concentrations and equity exposure.
+3. Empty Results (0 matching rows):
+   - Dynamically identify the specific WHERE or HAVING conditions applied in the query.
+   - Explain what criteria was being tested and what the absence of records means (e.g. explaining that funds are categorized as 'Active' or 'Passive' rather than 'Inactive').
+   - Do NOT claim that data doesn't exist in the database if only a specific filter condition was not satisfied.
+4. Distinguish Errors:
+   - If status is sql_error, explain that a database execution error occurred, distinguishing it from a valid query returning zero records.
+5. Data Scope & Limitations:
+   - If the user asks for something outside the schema (e.g. future forecasts or untracked benchmark series), clearly state what is missing and what relevant data is available.
+6. Factual Grounding:
+   - Never invent numbers, holdings, or facts not present in the result data.
+
+Return your explanation in the structured response field.
+"""
+    try:
+        res = call_gemini(prompt, ReasoningResponse)
+        return res.explanation.strip()
+    except Exception:
+        return ""
+
+
+# --------------------------------------------------
 # Generic response formatting
 # --------------------------------------------------
 
 def format_response(result):
-    """Format results according to their returned structure."""
+    """Format results according to their returned structure with dynamic reasoning."""
 
     if not isinstance(result, dict):
         return "Unable to format the agent response."
 
+    explanation = (result.get("explanation") or "").strip()
+    explanation_section = f"Analysis:\n{explanation}\n\n" if explanation else ""
+
     if not result.get("success"):
 
         if result.get("tool") == "unsupported":
-
+            if explanation:
+                return f"{explanation}\n\n(Scope Notice: {result.get('reason', 'Unsupported query')})"
             return result.get(
                 "reason",
                 "This question is outside the capabilities of this agent."
             )
 
-        return (
-            f"Unable to answer: "
-            f"{result.get('error', 'Unknown error')}"
-        )
+        err_msg = f"Unable to answer: {result.get('error', 'Unknown error')}"
+        if explanation:
+            err_msg += f"\n\nAnalysis:\n{explanation}"
+        return err_msg
 
     tool = result.get("tool")
 
@@ -423,7 +523,7 @@ def format_response(result):
                 f"Parameters: {data.get('sql_parameters', {})}"
             ])
 
-            return "\n".join(lines)
+            return explanation_section + "\n".join(lines)
 
         except (TypeError, ValueError) as error:
 
@@ -443,7 +543,7 @@ def format_response(result):
 
         if not rows:
 
-            answer = "No matching records were found."
+            answer = "No matching records were found in the database."
 
         elif len(columns) == 1 and len(rows) == 1:
 
@@ -479,7 +579,9 @@ def format_response(result):
         if result.get("truncated"):
             evidence += "\n\nNote: Results were truncated."
 
-        return answer + evidence
+        return explanation_section + answer + evidence
+
+    return "The agent returned an unrecognized result."
 
     return "The agent returned an unrecognized result."
 
@@ -576,10 +678,17 @@ def run_agent(question):
 
         # Handle questions outside the agent's capabilities.
         if decision.tool == "unsupported":
+            explanation = generate_reasoning(
+                question=question,
+                tool="unsupported",
+                status="unsupported",
+                data={"reason": decision.reason}
+            )
             return {
                 "success": False,
                 "tool": "unsupported",
-                "reason": decision.reason or "This question is not supported."
+                "reason": decision.reason or "This question is not supported.",
+                "explanation": explanation
             }
 
         # Use the exposure calculator for sector exposure questions.
@@ -593,11 +702,19 @@ def run_agent(question):
                 }
 
             result = calculate_sector_exposure(decision.portfolio_name)
+            explanation = generate_reasoning(
+                question=question,
+                tool="exposure_calculator",
+                status="success",
+                query=result.get("sql_query", ""),
+                data=result
+            )
 
             return {
                 "success": True,
                 "tool": "exposure_calculator",
-                "result": result
+                "result": result,
+                "explanation": explanation
             }
 
         # Use SQL for database questions.
@@ -607,21 +724,47 @@ def run_agent(question):
             result = execute_sql(sql)
 
             if not result.get("success"):
+                explanation = generate_reasoning(
+                    question=question,
+                    tool="sql",
+                    status="sql_error",
+                    query=sql,
+                    data={"error": result.get("error")}
+                )
                 return {
                     "success": False,
                     "tool": "sql",
                     "sql": sql,
-                    "error": result.get("error", "SQL execution failed.")
+                    "error": result.get("error", "SQL execution failed."),
+                    "explanation": explanation
                 }
+
+            cols = result.get("columns", [])
+            rows = result.get("rows", [])
+            row_count = result.get("row_count", len(rows))
+            status = "success" if rows else "empty_result"
+
+            explanation = generate_reasoning(
+                question=question,
+                tool="sql",
+                status=status,
+                query=sql,
+                data={
+                    "columns": cols,
+                    "rows": rows,
+                    "row_count": row_count
+                }
+            )
 
             return {
                 "success": True,
                 "tool": "sql",
                 "sql": sql,
-                "columns": result.get("columns", []),
-                "rows": result.get("rows", []),
-                "row_count": result.get("row_count", 0),
-                "truncated": result.get("truncated", False)
+                "columns": cols,
+                "rows": rows,
+                "row_count": row_count,
+                "truncated": result.get("truncated", False),
+                "explanation": explanation
             }
 
     except (ValueError, FileNotFoundError, sqlite3.Error, RuntimeError) as error:

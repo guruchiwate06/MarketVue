@@ -559,6 +559,53 @@ python -m streamlit run app.py
    ```
 5. Click **Deploy!** The cloud runner will install dependencies from `requirements.txt`, initialize the database from CSV files, and launch the web app.
 
+---
+
+## 16. Dynamic Reasoning and Natural-Language Response Layer
+
+To provide professional investment research insights rather than raw database dumps, the agent incorporates a **Dynamic Reasoning Layer** (`generate_reasoning()`).
+
+### A. Core Architecture
+
+The reasoning layer dynamically connects the user's analytical question, the executed query or operation, the execution status, and the returned database records to synthesize conclusions in natural language.
+
+```
++-------------------------------------------------------------+
+| User Question + Executed Query + Status + Query Results     |
++-------------------------------------------------------------+
+                              |
+                              v
++-------------------------------------------------------------+
+| Gemini Reasoning Layer (generate_reasoning)                |
+| - Evaluates analytical intent                               |
+| - Interprets aggregations, extremes, and comparisons        |
+| - Analyzes empty results against applied WHERE/HAVING filters|
+| - Distinguishes execution errors from zero-record results   |
++-------------------------------------------------------------+
+                              |
+                              v
++-------------------------------------------------------------+
+| Structured Output (ReasoningResponse)                       |
+| - Directly injected into run_agent()["explanation"]         |
+| - Rendered in CLI via format_response()                     |
+| - Highlighted in Web UI via styled Analysis Callout Cards   |
++-------------------------------------------------------------+
+```
+
+### B. Dynamic Analytical Behaviors
+
+1. **Aggregations & Metrics:**
+   - Rather than returning a bare number like `323500000.0`, the reasoning layer contextualizes the metric: *"The total Assets Under Management (AUM) combined across all portfolios is $323,500,000, representing the aggregate value of all active and passive strategies."*
+2. **Rankings & Comparisons:**
+   - When asked for the highest or lowest metric (e.g. volatility or AUM), it identifies the leading fund, names the exact value, and articulates the relative standing.
+3. **Empty Results Interpretation:**
+   - If a query returns 0 rows (e.g. searching for inactive portfolios), the agent inspects the query's WHERE clause and explains what condition failed: *"The query searched for portfolios with status = 'Inactive', but returned zero records because all portfolios in the database are categorized under 'Active' (10 funds) or 'Passive' (3 funds)."*
+4. **Distinguishing Execution Errors from Zero Matches:**
+   - If a table or column does not exist, the agent diagnoses the execution failure, references the valid tables in the schema, and suggests the correct query path.
+5. **Data Scope & Capabilities:**
+   - If a question requests future forecasts or untracked benchmark data, the agent explains the limitation and points the user to available historical metrics.
+
+
 
 
 

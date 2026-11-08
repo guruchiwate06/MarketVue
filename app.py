@@ -206,7 +206,7 @@ st.markdown("""
 <div class="header-box">
     <h1>Portfolio Analytics</h1>
     <p>An intelligent assistant for portfolio insights and financial analysis.</p>
-    <div class="status-badge">● SQLite Database Connected &nbsp;|&nbsp; Gemini 3.5 Flash-Lite Active</div>
+    <div class="status-badge">● SQLite Database Connected &nbsp;|&nbsp; Gemini AI Active</div>
 </div>
 """, unsafe_allow_html=True)
 
@@ -298,15 +298,25 @@ def render_result_entry(item, is_latest=False):
         st.error("The agent returned no response.")
         return
 
+    # Display dynamic reasoning / analytical interpretation if available
+    explanation = result.get("explanation")
+    if explanation:
+        st.markdown(f"""
+        <div style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-left: 4px solid #1e3a5f; padding: 0.9rem 1.15rem; border-radius: 6px; margin-bottom: 1rem; color: #0f172a; font-size: 0.95rem; line-height: 1.55;">
+            <strong style="color: #1e3a5f;">💡 Financial Analysis:</strong><br>{explanation}
+        </div>
+        """, unsafe_allow_html=True)
+
     # Check for empty input or basic error
     if not result.get("success"):
         tool = result.get("tool")
         if tool == "unsupported":
             reason = result.get("reason", "This question is outside the agent's capabilities.")
-            st.warning(f"**Unsupported Query:** {reason}")
+            if not explanation:
+                st.warning(f"**Unsupported Query:** {reason}")
         else:
             error_msg = result.get("error", "An error occurred during processing.")
-            st.error(f"**Error:** {error_msg}")
+            st.error(f"**Error Details:** {error_msg}")
 
         # If SQL was generated before failing, show technical details
         if result.get("sql"):
@@ -324,7 +334,7 @@ def render_result_entry(item, is_latest=False):
         truncated = result.get("truncated", False)
 
         if not rows:
-            st.info("No matching records found in the database.")
+            st.info("The query executed successfully, but 0 matching records were found for the specified criteria.")
         else:
             # Single value display (1 column, 1 row)
             if len(columns) == 1 and len(rows) == 1:
