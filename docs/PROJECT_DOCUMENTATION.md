@@ -494,5 +494,71 @@ Agent accuracy: 86.67%
 | **Official Ground Truth** | `evaluate.py` | 10 | **100.00% (10/10)** | Official assignment benchmark covering SQL tool, CTE aggregations, and Exposure Calculator. |
 | **Extended Evaluation** | `evaluate_extended.py` | 30 | **86.67% (26/30)** | Completely unforced test covering 6 diverse categories across 30 natural language queries. |
 
+---
+
+## 15. Streamlit Web Interface and Cloud Deployment Guide
+
+A clean, institutional web interface has been developed in `app.py` to allow users to interactively query the Portfolio Analytics Agent.
+
+### A. Interface Design and Identity
+
+- **Application Title:** **Portfolio Analytics**
+- **Subtitle:** "An intelligent assistant for portfolio insights and financial analysis."
+- **Visual Styling:** Inspired by institutional financial-services design (deep corporate navy `#0f2b48`, crisp white cards `#ffffff`, slate borders `#e2e8f0`, and high-contrast typography).
+- **Independent Identity:** Strictly adheres to branding constraints with no proprietary logos, company references, or vendor branding in page titles, headers, footers, or sidebars.
+
+### B. Core Frontend Features
+
+1. **Natural Language Question Input:** Single-page conversational interface with an "Ask Agent" button and loading indicator (`st.spinner`).
+2. **One-Click Example Questions:** Prominently displays four representative queries:
+   - *"What is the total AUM across all portfolios?"*
+   - *"Which sector has the highest exposure in Growth Equity Fund?"*
+   - *"Which portfolio has the highest recorded volatility?"*
+   - *"Show the five most recent transactions."*
+3. **Structured Response Formatting:**
+   - Single financial figures rendered in highlighted metric pills.
+   - SQL query outputs rendered in responsive DataFrames (`st.dataframe`).
+   - Sector exposures rendered with sector percentage tables, equity metrics, and underlying stock holding tables.
+4. **Technical Details & Audit Trail:**
+   - Expandable section (`st.expander`) displaying the selected tool, the exact generated SQL query, rows returned, and calculation parameters.
+   - Shows only authentic data returned by `run_agent()`.
+5. **Session-Based Conversation History:** Preserves queries and responses in reverse-chronological order within `st.session_state` without persistent external database dependencies, complete with a "Clear Conversation History" control.
+
+### C. Backend Connection and Security
+
+- `app.py` connects directly to the existing `run_agent(question)` backend in `portfolio_agent.py`. It does not duplicate agent logic, SQL generators, or exposure calculators.
+- **Secure Key Management:**
+  - Locally: Reads `GEMINI_API_KEY` from `.env`.
+  - Streamlit Cloud: Automatically detects `st.secrets["GEMINI_API_KEY"]`.
+  - Fallback: Provides a password-masked sidebar input if no key is configured in the environment.
+- **Automatic Cloud Database Initialization:**
+  - Because `portfolio.db` is ignored in `.gitignore`, `app.py` checks for the database on startup. If not found, it runs `database.create_database()` to build the SQLite database from `data/*.csv` and `database_schema.sql` automatically.
+
+### D. How to Run Locally
+
+```bash
+# Run the Streamlit web application
+streamlit run app.py
+# or
+python -m streamlit run app.py
+```
+
+### E. How to Deploy on Streamlit Community Cloud
+
+1. Commit and push the repository to GitHub:
+   ```bash
+   git add .
+   git commit -m "feat: Add Streamlit frontend and deployment configuration"
+   git push origin main
+   ```
+2. Navigate to [share.streamlit.io](https://share.streamlit.io) and sign in.
+3. Click **New app**, select the repository and branch (`main`), and set the main file path to `app.py`.
+4. Under **Advanced settings** > **Secrets**, enter your Gemini API key:
+   ```toml
+   GEMINI_API_KEY = "your-actual-gemini-api-key"
+   ```
+5. Click **Deploy!** The cloud runner will install dependencies from `requirements.txt`, initialize the database from CSV files, and launch the web app.
+
+
 
 

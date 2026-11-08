@@ -106,3 +106,26 @@ model = genai.GenerativeModel('gemini-pro')
 
 
 Don't worry about perfect accuracy - focus on building something that works and shows good engineering practices!
+
+---
+
+## Deployment Instructions (Streamlit Community Cloud)
+
+1. **Repository Setup**: Push this repository to GitHub.
+2. **Deploy on Streamlit**:
+   - Navigate to [share.streamlit.io](https://share.streamlit.io).
+   - Select your repository and set the main file path to `app.py`.
+3. **Configure API Key**:
+   - In the Streamlit Cloud dashboard, open **Settings** > **Secrets**.
+   - Add your Gemini API key:
+     ```toml
+     GEMINI_API_KEY = "your-gemini-api-key-here"
+     ```
+4. **Database Initialization**:
+   - On the cloud instance, `app.py` automatically initializes `portfolio.db` from the source CSV files in `data/` and `database_schema.sql` on startup.
+5. **Running Locally**:
+   ```bash
+   streamlit run app.py
+   # or
+   python -m streamlit run app.py
+   ```

@@ -97,12 +97,16 @@ _MIN_PACING_SECONDS = 3.0
 
 def call_gemini(prompt, response_model):
     """Call Gemini and validate its structured response, with request pacing and retry on transient errors."""
-    global _LAST_CALL_TIMESTAMP
+    global client, API_KEY, _LAST_CALL_TIMESTAMP
 
     if client is None:
-        raise RuntimeError(
-            "GEMINI_API_KEY is missing. Check your .env file."
-        )
+        API_KEY = os.getenv("GEMINI_API_KEY")
+        if API_KEY:
+            client = genai.Client(api_key=API_KEY)
+        else:
+            raise RuntimeError(
+                "GEMINI_API_KEY is missing. Check your .env file or application configuration."
+            )
 
     max_retries = 3
     for attempt in range(max_retries):
