@@ -20,6 +20,14 @@ from exposure_calculator import calculate_sector_exposure
 
 load_dotenv()
 
+# Discover Streamlit secrets if running inside a Streamlit deployment
+try:
+    import streamlit as _st
+    if hasattr(_st, "secrets") and "GEMINI_API_KEY" in _st.secrets and not os.getenv("GEMINI_API_KEY"):
+        os.environ["GEMINI_API_KEY"] = _st.secrets["GEMINI_API_KEY"]
+except Exception:
+    pass
+
 API_KEY = os.getenv("GEMINI_API_KEY")
 ACTIVE_MODELS = [
     os.getenv("GEMINI_MODEL", "gemini-3.5-flash"),
@@ -33,8 +41,79 @@ client = genai.Client(api_key=API_KEY) if API_KEY else None
 
 
 # --------------------------------------------------
-# Structured response models
+# Structured response models & Exception Wrappers
 # --------------------------------------------------
+
+class GeminiAPIException(RuntimeError):
+    """Structured exception wrapping Gemini API failures with classified error_type."""
+    def __init__(self, message: str, error_type: str = "api_error", original_error: Optional[Exception] = None):
+        super().__init__(message)
+        self.error_type = error_type
+        self.original_error = original_error
+
+
+class ReasoningResult(str):
+    """
+    A string subclass that also carries reasoning_status and reasoning_error attributes,
+    and supports 3-tuple unpacking: (explanation, reasoning_status, reasoning_error).
+    Preserves 100% backward compatibility with string usage.
+    """
+    def __new__(cls, text="", status="success", error=None):
+        instance = super().__new__(cls, text)
+        instance.status = status
+        instance.error = error
+        return instance
+
+    def __iter__(self):
+        return iter((str(self), self.status, self.error))
+
+
+def classify_gemini_error(error: Exception) -> tuple[str, str]:
+    """
+    Classify an exception from Gemini or the network into (error_type, friendly_message).
+    Types: 'quota_exhausted', 'auth_error', 'network_error', 'invalid_response', 'missing_api_key', 'api_error'
+    """
+    if isinstance(error, GeminiAPIException):
+        return error.error_type, str(error)
+
+    err_str = str(error)
+    err_lower = err_str.lower()
+
+    if "gemini_api_key is missing" in err_lower or "api key is not configured" in err_lower:
+        return (
+            "missing_api_key",
+            "Gemini API key is not configured. Check your .env file or deployment secrets."
+        )
+
+    if any(k in err_str for k in ["RESOURCE_EXHAUSTED", "429"]) or "quota" in err_lower or "rate limit" in err_lower:
+        return (
+            "quota_exhausted",
+            "Gemini API free-tier quota exhausted. Daily request limit or rate limit exceeded."
+        )
+
+    if any(k in err_str for k in ["401", "403", "API_KEY_INVALID", "PERMISSION_DENIED", "UNAUTHENTICATED"]) or "invalid api key" in err_lower:
+        return (
+            "auth_error",
+            "Gemini API authentication failed. Please verify that your GEMINI_API_KEY is valid."
+        )
+
+    if any(k in err_str for k in ["ConnectError", "Timeout", "ConnectionRefused", "RemoteDisconnected", "NameResolutionError"]) or "timed out" in err_lower or "network" in err_lower:
+        return (
+            "network_error",
+            "Network connection to the Gemini API failed or timed out."
+        )
+
+    if "empty response" in err_lower or "did not match" in err_lower:
+        return (
+            "invalid_response",
+            "Gemini returned an invalid or empty response structure."
+        )
+
+    return (
+        "api_error",
+        f"Gemini API request failed: {err_str}"
+    )
+
 
 class ToolDecision(BaseModel):
     tool: Literal["sql", "exposure_calculator", "unsupported"]
@@ -113,8 +192,9 @@ def call_gemini(prompt, response_model):
         if API_KEY:
             client = genai.Client(api_key=API_KEY)
         else:
-            raise RuntimeError(
-                "GEMINI_API_KEY is missing. Check your .env file or application configuration."
+            raise GeminiAPIException(
+                "GEMINI_API_KEY is not configured. Check your .env file or application configuration.",
+                error_type="missing_api_key"
             )
 
     models_to_try = [MODEL_NAME] + [m for m in ACTIVE_MODELS if m != MODEL_NAME]
@@ -148,17 +228,22 @@ def call_gemini(prompt, response_model):
 
                 # Validate JSON text if parsed output is unavailable.
                 if not response.text:
-                    raise ValueError("Gemini returned an empty response.")
+                    raise GeminiAPIException(
+                        "Gemini returned an empty response.",
+                        error_type="invalid_response"
+                    )
 
                 return response_model.model_validate_json(response.text)
 
             except ValidationError as error:
-                raise ValueError(
-                    "Gemini returned data that did not match "
-                    "the required response structure."
+                last_error = error
+                raise GeminiAPIException(
+                    "Gemini returned data that did not match the required response structure.",
+                    error_type="invalid_response",
+                    original_error=error
                 ) from error
 
-            except ValueError:
+            except GeminiAPIException:
                 raise
 
             except Exception as error:
@@ -177,8 +262,11 @@ def call_gemini(prompt, response_model):
 
                 break
 
-    raise RuntimeError(
-        f"Gemini request failed: {last_error}"
+    err_type, friendly_msg = classify_gemini_error(last_error)
+    raise GeminiAPIException(
+        friendly_msg,
+        error_type=err_type,
+        original_error=last_error
     ) from last_error
 
 
@@ -360,14 +448,15 @@ Generate the SQL query now.
 # Dynamic Reasoning Layer
 # --------------------------------------------------
 
-def generate_reasoning(question, tool, status, query="", data=None):
+def generate_reasoning(question, tool, status, query="", data=None) -> ReasoningResult:
     """
     Dynamically interpret the question, query/operation, and query results
     to generate an insightful, natural-language explanation.
+    Never invents facts or financial conclusions when Gemini is unavailable.
     """
     global client, API_KEY
     if client is None and not os.getenv("GEMINI_API_KEY"):
-        return ""
+        return ReasoningResult("", status="unconfigured", error="Gemini API key is not configured.")
 
     data_summary = ""
     if tool == "sql":
@@ -443,9 +532,13 @@ Return your explanation in the structured response field.
 """
     try:
         res = call_gemini(prompt, ReasoningResponse)
-        return res.explanation.strip()
-    except Exception:
-        return ""
+        explanation_text = res.explanation.strip() if res and res.explanation else ""
+        if not explanation_text:
+            return ReasoningResult("", status="empty_response", error="Gemini returned an empty explanation.")
+        return ReasoningResult(explanation_text, status="success", error=None)
+    except Exception as error:
+        err_type, friendly_msg = classify_gemini_error(error)
+        return ReasoningResult("", status=err_type, error=friendly_msg)
 
 
 # --------------------------------------------------
@@ -471,10 +564,23 @@ def format_response(result):
                 "This question is outside the capabilities of this agent."
             )
 
-        err_msg = f"Unable to answer: {result.get('error', 'Unknown error')}"
+        err_type = result.get("error_type", "error")
+        err_msg = result.get("error", "Unknown error")
+        if err_type == "quota_exhausted":
+            prefix = "API Quota Exhausted"
+        elif err_type == "auth_error":
+            prefix = "Authentication Failed"
+        elif err_type == "network_error":
+            prefix = "Network Error"
+        elif err_type == "sql_error":
+            prefix = "Database Query Error"
+        else:
+            prefix = "Unable to answer"
+
+        formatted_err = f"{prefix}: {err_msg}"
         if explanation:
-            err_msg += f"\n\nAnalysis:\n{explanation}"
-        return err_msg
+            formatted_err += f"\n\nAnalysis:\n{explanation}"
+        return formatted_err
 
     tool = result.get("tool")
 
@@ -686,6 +792,7 @@ def run_agent(question):
     if not question or not question.strip():
         return {
             "success": False,
+            "error_type": "validation_error",
             "error": "Please enter a question."
         }
 
@@ -704,8 +811,11 @@ def run_agent(question):
             return {
                 "success": False,
                 "tool": "unsupported",
+                "error_type": "unsupported",
                 "reason": decision.reason or "This question is not supported.",
-                "explanation": explanation
+                "explanation": str(explanation),
+                "reasoning_status": explanation.status,
+                "reasoning_error": explanation.error
             }
 
         # Use the exposure calculator for sector exposure questions.
@@ -715,6 +825,7 @@ def run_agent(question):
                 return {
                     "success": False,
                     "tool": "exposure_calculator",
+                    "error_type": "validation_error",
                     "error": "Please provide a portfolio name."
                 }
 
@@ -731,7 +842,9 @@ def run_agent(question):
                 "success": True,
                 "tool": "exposure_calculator",
                 "result": result,
-                "explanation": explanation
+                "explanation": str(explanation),
+                "reasoning_status": explanation.status,
+                "reasoning_error": explanation.error
             }
 
         # Use SQL for database questions.
@@ -752,8 +865,11 @@ def run_agent(question):
                     "success": False,
                     "tool": "sql",
                     "sql": sql,
+                    "error_type": "sql_error",
                     "error": result.get("error", "SQL execution failed."),
-                    "explanation": explanation
+                    "explanation": str(explanation),
+                    "reasoning_status": explanation.status,
+                    "reasoning_error": explanation.error
                 }
 
             cols = result.get("columns", [])
@@ -781,19 +897,34 @@ def run_agent(question):
                 "rows": rows,
                 "row_count": row_count,
                 "truncated": result.get("truncated", False),
-                "explanation": explanation
+                "explanation": str(explanation),
+                "reasoning_status": explanation.status,
+                "reasoning_error": explanation.error
             }
 
-    except (ValueError, FileNotFoundError, sqlite3.Error, RuntimeError) as error:
+    except GeminiAPIException as error:
         return {
             "success": False,
-            "error": str(error)
+            "error_type": error.error_type,
+            "error": str(error),
+            "details": str(error.original_error) if error.original_error else str(error)
+        }
+
+    except (ValueError, FileNotFoundError, sqlite3.Error, RuntimeError) as error:
+        err_type, friendly_msg = classify_gemini_error(error)
+        return {
+            "success": False,
+            "error_type": err_type,
+            "error": friendly_msg,
+            "details": str(error)
         }
 
     except Exception as error:
         return {
             "success": False,
-            "error": f"Unexpected error: {error}"
+            "error_type": "system_error",
+            "error": f"Unexpected error: {error}",
+            "details": str(error)
         }
 
 

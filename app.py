@@ -4,6 +4,8 @@ A clean, professional interface for conversational portfolio analytics and quant
 """
 
 import os
+import html
+import sqlite3
 from pathlib import Path
 import streamlit as st
 import pandas as pd
@@ -42,7 +44,23 @@ def ensure_database():
 
 ensure_database()
 
-# Import the existing backend agent
+def check_database_status():
+    """Verify local SQLite database connectivity independently of Gemini."""
+    try:
+        db_path = BASE_DIR / "portfolio.db"
+        if not db_path.exists():
+            return False, "Database file not found"
+        connection = sqlite3.connect(f"file:{db_path.as_posix()}?mode=ro", uri=True)
+        portfolio_count = connection.execute("SELECT COUNT(*) FROM portfolios").fetchone()[0]
+        table_count = connection.execute(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
+        ).fetchone()[0]
+        connection.close()
+        return True, f"Connected ({table_count} tables, {portfolio_count} funds)"
+    except Exception as exc:
+        return False, f"Connection failed: {exc}"
+
+# Import the backend agent
 from portfolio_agent import run_agent, format_response
 
 
@@ -82,7 +100,13 @@ CUSTOM_CSS = """
         font-weight: 400;
     }
     
-    /* Clean status badge */
+    /* Clean status badges */
+    .status-container {
+        display: flex;
+        gap: 0.75rem;
+        flex-wrap: wrap;
+        margin-top: 0.75rem;
+    }
     .status-badge {
         display: inline-block;
         background-color: rgba(255, 255, 255, 0.08);
@@ -91,8 +115,13 @@ CUSTOM_CSS = """
         border-radius: 4px;
         font-size: 0.8rem;
         font-weight: 500;
-        margin-top: 0.75rem;
         border: 1px solid rgba(255, 255, 255, 0.12);
+    }
+    .status-db {
+        border-left: 3px solid #10b981;
+    }
+    .status-api {
+        border-left: 3px solid #38bdf8;
     }
 
     /* Analysis Callout Card */
@@ -116,6 +145,9 @@ CUSTOM_CSS = """
         text-transform: uppercase;
         letter-spacing: 0.04em;
         margin-bottom: 0.35rem;
+    }
+    .analysis-body {
+        color: #1e293b;
     }
 
     /* Single Metric Pill */
@@ -157,12 +189,32 @@ if "conversation_history" not in st.session_state:
 if "pending_question" not in st.session_state:
     st.session_state.pending_question = None
 
+if "gemini_status" not in st.session_state:
+    has_key = bool(os.getenv("GEMINI_API_KEY"))
+    if has_key:
+        st.session_state.gemini_status = "Standby (Key detected, unverified)"
+    else:
+        st.session_state.gemini_status = "Unconfigured (API key missing)"
+
 
 # --------------------------------------------------
 # Sidebar: Dataset Specifications & Controls
 # --------------------------------------------------
 
+db_is_connected, db_status_msg = check_database_status()
+
 with st.sidebar:
+    st.markdown("### System Availability")
+    db_indicator = "Connected" if db_is_connected else "Disconnected"
+    st.markdown(f"- **Database Engine:** {db_indicator}")
+    st.markdown(f"  <small style='color: #64748b;'>{html.escape(db_status_msg)}</small>", unsafe_allow_html=True)
+    st.markdown(f"- **AI Reasoning Service:**")
+    st.markdown(f"  <small style='color: #64748b;'>{html.escape(st.session_state.gemini_status)}</small>", unsafe_allow_html=True)
+
+    if "Quota Exhausted" in st.session_state.gemini_status:
+        st.warning("Gemini API free-tier quota is currently exhausted. Natural-language AI reasoning is temporarily paused; direct database queries remain operational.")
+
+    st.markdown("---")
     st.markdown("### Portfolio Dataset")
     st.markdown("""
     - **Portfolios:** 13 Funds
@@ -191,11 +243,17 @@ with st.sidebar:
 # Application Header
 # --------------------------------------------------
 
-st.markdown("""
+db_badge_text = f"Database: {db_status_msg}"
+api_badge_text = f"AI Reasoning: {st.session_state.gemini_status}"
+
+st.markdown(f"""
 <div class="header-box">
     <h1>MarketView</h1>
     <p>An intelligent assistant for portfolio insights and financial analysis.</p>
-    <div class="status-badge">System Status: Connected to SQLite Engine | Quantitative Reasoning Active</div>
+    <div class="status-container">
+        <div class="status-badge status-db">{html.escape(db_badge_text)}</div>
+        <div class="status-badge status-api">{html.escape(api_badge_text)}</div>
+    </div>
 </div>
 """, unsafe_allow_html=True)
 
@@ -265,6 +323,19 @@ if question_to_process:
     with st.spinner("Analyzing query and executing quantitative analysis..."):
         agent_result = run_agent(question_to_process)
         
+        # Update Gemini status based on the live response
+        err_type = agent_result.get("error_type")
+        r_status = agent_result.get("reasoning_status")
+
+        if err_type == "quota_exhausted" or r_status == "quota_exhausted":
+            st.session_state.gemini_status = "Quota Exhausted (Free Tier Exceeded)"
+        elif err_type == "auth_error" or r_status == "auth_error":
+            st.session_state.gemini_status = "Authentication Error"
+        elif err_type == "network_error" or r_status == "network_error":
+            st.session_state.gemini_status = "Network Unreachable"
+        elif agent_result.get("explanation") and r_status == "success":
+            st.session_state.gemini_status = "Active (Verified)"
+
         # Save to session conversation history (newest at the beginning)
         st.session_state.conversation_history.insert(0, {
             "question": question_to_process,
@@ -281,26 +352,49 @@ def render_result_entry(item, is_latest=False):
     question = item["question"]
     result = item["result"]
 
-    st.markdown(f"<div class='query-header'>Query: {question}</div>", unsafe_allow_html=True)
+    st.markdown(f"<div class='query-header'>Query: {html.escape(question)}</div>", unsafe_allow_html=True)
 
     if not result:
         st.error("The agent returned no response.")
         return
 
-    # Display dynamic reasoning / analytical interpretation
+    # 1. Safely render dynamic reasoning explanation if present
     explanation = result.get("explanation")
     if explanation:
+        safe_explanation = html.escape(str(explanation)).replace("\n", "<br>")
         st.markdown(f"""
         <div class="analysis-card">
             <span class="analysis-title">Executive Summary & Analysis</span>
-            {explanation}
+            <div class="analysis-body">{safe_explanation}</div>
         </div>
         """, unsafe_allow_html=True)
 
-    # Check for empty input or basic error
+    # 2. Inform user cleanly if reasoning was unavailable
+    r_status = result.get("reasoning_status")
+    if not explanation and r_status and r_status != "success":
+        if r_status == "quota_exhausted":
+            st.info("AI Reasoning Notice: Natural-language reasoning is temporarily unavailable due to Gemini API free-tier quota exhaustion. Underlying data results are presented below.")
+        elif r_status == "auth_error":
+            st.warning("AI Reasoning Notice: Natural-language reasoning is unavailable due to an API authentication failure.")
+        elif r_status == "network_error":
+            st.warning("AI Reasoning Notice: Natural-language reasoning is unavailable due to a network connection timeout.")
+        elif r_status == "unconfigured":
+            st.info("AI Reasoning Notice: Gemini API key is not configured. Natural-language reasoning is disabled.")
+
+    # 3. Handle failure cases (routing or execution errors)
     if not result.get("success"):
+        err_type = result.get("error_type")
         tool = result.get("tool")
-        if tool == "unsupported":
+
+        if err_type == "quota_exhausted":
+            st.warning("API Quota Notice: The Gemini API free-tier quota is currently exhausted. Natural-language query translation is temporarily paused. Underlying SQLite data and calculations remain intact.")
+        elif err_type == "auth_error":
+            st.error("Authentication Error: The Gemini API rejected the credentials. Please verify your GEMINI_API_KEY.")
+        elif err_type == "network_error":
+            st.error("Network Error: Could not reach the Gemini API service. Please verify your internet connection.")
+        elif err_type == "sql_error":
+            st.error(f"Database Query Error: {result.get('error', 'SQL execution failed.')}")
+        elif tool == "unsupported":
             reason = result.get("reason", "This request falls outside available portfolio analytics capabilities.")
             if not explanation:
                 st.warning(f"Scope Notice: {reason}")
@@ -311,11 +405,15 @@ def render_result_entry(item, is_latest=False):
         if result.get("sql"):
             with st.expander("Technical Details & Attempted SQL"):
                 st.code(result.get("sql"), language="sql")
+        if result.get("details"):
+            with st.expander("Technical Error Details"):
+                st.text(result.get("details"))
         return
 
+    # 4. Handle successful execution
     tool = result.get("tool")
 
-    # 1. SQL Result Presentation
+    # SQL Result Presentation
     if tool == "sql":
         columns = result.get("columns", [])
         rows = result.get("rows", [])
@@ -323,14 +421,16 @@ def render_result_entry(item, is_latest=False):
         truncated = result.get("truncated", False)
 
         if not rows:
-            st.info("The query completed successfully. Zero records met the specified criteria.")
+            st.info("Query completed successfully. Zero records met the specified criteria.")
         else:
             # Single value display (1 column, 1 row)
             if len(columns) == 1 and len(rows) == 1:
                 val = rows[0][0]
                 col_name = columns[0]
-                formatted_val = f"${val:,.2f}" if isinstance(val, (int, float)) and ("aum" in col_name.lower() or "cost" in col_name.lower() or "price" in col_name.lower() or "value" in col_name.lower()) else str(val)
-                st.markdown(f"<div class='metric-pill'>{col_name}: {formatted_val}</div>", unsafe_allow_html=True)
+                formatted_val = f"${val:,.2f}" if isinstance(val, (int, float)) and any(term in col_name.lower() for term in ["aum", "cost", "price", "value"]) else str(val)
+                safe_col = html.escape(str(col_name))
+                safe_val = html.escape(str(formatted_val))
+                st.markdown(f"<div class='metric-pill'>{safe_col}: {safe_val}</div>", unsafe_allow_html=True)
             else:
                 # Tabular display
                 df = pd.DataFrame(rows, columns=columns)
@@ -348,10 +448,11 @@ def render_result_entry(item, is_latest=False):
         with st.expander("Technical Details & SQL Execution"):
             st.markdown(f"**Tool Invoked:** `{tool}`")
             st.markdown(f"**Records Returned:** {row_count}")
+            st.markdown(f"**Reasoning Status:** `{r_status or 'N/A'}`")
             st.markdown("**Executed SQL Query:**")
             st.code(result.get("sql", ""), language="sql")
 
-    # 2. Exposure Calculator Presentation
+    # Exposure Calculator Presentation
     elif tool == "exposure_calculator":
         res_data = result.get("result", {})
         portfolio_name = res_data.get("portfolio_name", "Portfolio")
@@ -361,7 +462,7 @@ def render_result_entry(item, is_latest=False):
         sql_used = res_data.get("sql_query") or res_data.get("sql_used", "")
         sql_params = res_data.get("sql_parameters") or res_data.get("sql_params", {})
 
-        st.markdown(f"**Sector Exposure Breakdown: {portfolio_name}**")
+        st.markdown(f"**Sector Exposure Breakdown: {html.escape(portfolio_name)}**")
 
         # Metric summary
         col_m1, col_m2 = st.columns(2)
@@ -396,8 +497,9 @@ def render_result_entry(item, is_latest=False):
         # Technical Details Expander
         with st.expander("Technical Details & Calculation Parameters"):
             st.markdown(f"**Tool Invoked:** `{tool}`")
-            st.markdown(f"**Portfolio:** {portfolio_name} (Identifier: {res_data.get('portfolio_id')})")
+            st.markdown(f"**Portfolio:** {html.escape(str(portfolio_name))} (Identifier: {res_data.get('portfolio_id')})")
             st.markdown(f"**Equity Weight Aggregation:** {total_weight:.4f}")
+            st.markdown(f"**Reasoning Status:** `{r_status or 'N/A'}`")
             if sql_used:
                 st.markdown("**Underlying Holdings Query:**")
                 st.code(sql_used, language="sql")
