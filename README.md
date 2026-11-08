@@ -82,8 +82,8 @@ The SQLite database (`portfolio.db`) is structured across nine tables:
 ### 1. Installation
 
 ```bash
-git clone https://github.com/guruchiwate06/PL_Capital_Project.git
-cd PL_Capital_Project
+git clone https://github.com/guruchiwate06/MarketVue.git
+cd MarketVue
 
 python -m venv venv
 # Windows:
