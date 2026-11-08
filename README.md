@@ -55,7 +55,7 @@ The agent processes incoming queries through a five-stage pipeline:
 - **`sql_tool.py`**: Secure SQLite execution harness with read-only connection limits, step execution boundaries, and authorizer callbacks.
 - **`exposure_calculator.py`**: Deterministic calculator for portfolio sector allocations. Filters out fixed-income assets and returns position-level audit logs.
 - **`database.py`**: Database initialization script that loads and normalizes raw CSV datasets into indexed SQLite tables.
-- **`app.py`**: Streamlit web interface with suggested analytical queries, technical detail expanders, and session history.
+- **`app.py`**: Streamlit web interface with suggested analytical queries, technical detail expanders, session history, and session query limits (10 queries/session).
 
 ---
 
@@ -134,3 +134,13 @@ Run the benchmarks:
 python evaluate.py
 python evaluate_extended.py
 ```
+
+---
+
+## Session Usage Limits & API Protection
+
+Because MarketVue is a publicly accessible demonstration repository, a per-session question limit is enforced to prevent shared Gemini API quota exhaustion:
+
+- **Limit**: Maximum of 10 AI-powered questions per Streamlit session.
+- **Warning Threshold**: A warning notice appears after question 7, displaying remaining queries.
+- **Limit Enforcement**: After question 10, additional AI queries are disabled while full access to portfolio data, dataframes, and prior results is preserved.

@@ -523,6 +523,10 @@ A clean, institutional web interface has been developed in `app.py` to allow use
    - Expandable section (`st.expander`) displaying the selected tool, the exact generated SQL query, rows returned, and calculation parameters.
    - Shows only authentic data returned by `run_agent()`.
 5. **Session-Based Conversation History:** Preserves queries and responses in reverse-chronological order within `st.session_state` without persistent external database dependencies, complete with a "Clear Conversation History" control.
+6. **Per-Session Question Limit & Quota Protection:**
+   - Because the repository and deployed application are public, a fair-use limit of 10 AI-powered questions per session is enforced in `st.session_state` to prevent rapid exhaustion of the underlying Gemini API free-tier quota.
+   - An advisory warning appears after the 7th question, informing the user of remaining queries.
+   - Upon reaching the 10th question, input fields and query buttons are disabled, while full access to portfolio data, dataframes, and prior results is preserved.
 
 ### C. Backend Connection and Security
 
