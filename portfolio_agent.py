@@ -268,9 +268,9 @@ PORTFOLIO ANALYTICS RULES:
   calculate AVG(s.current_price) AS avg_price, group by sector_name,
   and order by avg_price DESC.
 
-- When a question requests the top holdings by cost basis:
-  select h.holding_id, s.symbol, s.company_name, h.quantity, h.cost_basis,
-  sort by h.cost_basis in descending order, and apply the requested LIMIT.
+- When a question requests the top holdings by a metric (such as cost basis or market value):
+  select h.holding_id, s.symbol, s.company_name, h.quantity, and the requested ranking metric (e.g. h.cost_basis),
+  sort by that metric in descending order, and apply the requested LIMIT.
 
 - When a question requests portfolios with holdings in more than N sectors and their diversification metrics:
   filter stock holdings (s.asset_type = 'Stock'), group by portfolio,
@@ -280,10 +280,10 @@ PORTFOLIO ANALYTICS RULES:
   Select only: portfolio_name, sector_count, total_holdings, diversification_ratio.
 
 - When a question asks for a specific sector's value and what percentage it represents of total portfolio value for each portfolio:
-  use two CTEs or subqueries: one to calculate the sector value (joining holdings, securities, and sectors for that sector), and a second to calculate the total portfolio value across all holdings (joining portfolios, holdings, and securities without filtering or joining sectors so all holdings are counted in total value).
+  use two CTEs or subqueries: one to calculate that sector's value (joining holdings, securities, and sectors for that sector), and a second to calculate the total portfolio value across all holdings (joining portfolios, holdings, and securities without filtering or joining sectors so all holdings are counted in total value).
   Join the two on portfolio_id and select:
-  portfolio_name, tech_value, total_value, and tech_percentage (calculated as ROUND((tech_value / total_value) * 100, 2)),
-  ordered by tech_percentage DESC. Do not include portfolio_id in the final SELECT.
+  portfolio_name, the sector value column (e.g. tech_value or sector_value), total_value, and the percentage (calculated as ROUND((sector_value / total_value) * 100, 2)),
+  ordered by percentage DESC. Do not include portfolio_id in the final SELECT.
 
 RESULT ACCURACY:
 
