@@ -228,15 +228,19 @@ EXAMPLES = [
 
 if example_col1.button(EXAMPLES[0], key="ex1", use_container_width=True):
     st.session_state.pending_question = EXAMPLES[0]
+    st.rerun()
 
 if example_col2.button(EXAMPLES[1], key="ex2", use_container_width=True):
     st.session_state.pending_question = EXAMPLES[1]
+    st.rerun()
 
 if example_col3.button(EXAMPLES[2], key="ex3", use_container_width=True):
     st.session_state.pending_question = EXAMPLES[2]
+    st.rerun()
 
 if example_col4.button(EXAMPLES[3], key="ex4", use_container_width=True):
     st.session_state.pending_question = EXAMPLES[3]
+    st.rerun()
 
 
 # --------------------------------------------------
