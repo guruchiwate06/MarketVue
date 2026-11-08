@@ -15,7 +15,7 @@ import pandas as pd
 # --------------------------------------------------
 
 st.set_page_config(
-    page_title="MarketView",
+    page_title="MarketVue",
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -234,7 +234,7 @@ with st.sidebar:
 
     st.markdown("---")
     st.markdown(
-        "<small style='color: #64748b;'>MarketView Analytics Platform<br>Institutional Quantitative Research</small>",
+        "<small style='color: #64748b;'>MarketVue Analytics Platform<br>Institutional Quantitative Research</small>",
         unsafe_allow_html=True
     )
 
@@ -248,7 +248,7 @@ api_badge_text = f"AI Reasoning: {st.session_state.gemini_status}"
 
 st.markdown(f"""
 <div class="header-box">
-    <h1>MarketView</h1>
+    <h1>MarketVue</h1>
     <p>An intelligent assistant for portfolio insights and financial analysis.</p>
     <div class="status-container">
         <div class="status-badge status-db">{html.escape(db_badge_text)}</div>

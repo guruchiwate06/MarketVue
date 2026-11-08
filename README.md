@@ -1,6 +1,6 @@
-# MarketView - Portfolio Analytics Agent
+# MarketVue - Portfolio Analytics Agent
 
-MarketView is an AI-powered portfolio analytics agent that translates natural-language financial questions into read-only SQL queries and deterministic sector exposure calculations. It combines structured SQLite data retrieval with a dynamic reasoning layer to deliver clear, verifiable analytical responses.
+MarketVue is an AI-powered portfolio analytics agent that translates natural-language financial questions into read-only SQL queries and deterministic sector exposure calculations. It combines structured SQLite data retrieval with a dynamic reasoning layer to deliver clear, verifiable analytical responses.
 
 ---
 
@@ -36,7 +36,7 @@ The agent processes incoming queries through a five-stage pipeline:
                              |
                              v
                  [ Natural-Language Answer ]
-                  (MarketView UI / Terminal)
+                  (MarketVue UI / Terminal)
 ```
 
 ### Execution Flow
@@ -45,7 +45,7 @@ The agent processes incoming queries through a five-stage pipeline:
 2. **Deterministic Exposure Calculation**: Fund sector weights are computed programmatically using predefined equity-weighting logic (`asset_type = 'Stock'`), eliminating SQL generation errors for sector allocations.
 3. **Safe SQL Execution**: Queries run against SQLite using a read-only URI (`?mode=ro`) and an authorizer hook that blocks write operations (`INSERT`, `UPDATE`, `DELETE`, `DROP`) and internal table probing.
 4. **Dynamic Reasoning**: A dedicated Gemini reasoning pass interprets query results, contextualizes financial metrics, explains conditions when zero records match, and separates SQL execution errors from empty datasets.
-5. **Presentation**: Results, generated SQL, execution metadata, and reasoning are presented cleanly through the MarketView web dashboard or command line.
+5. **Presentation**: Results, generated SQL, execution metadata, and reasoning are presented cleanly through the MarketVue web dashboard or command line.
 
 ---
 
@@ -110,7 +110,7 @@ python database.py
 
 ### 4. Run the Application
 
-**Web Dashboard (MarketView):**
+**Web Dashboard (MarketVue):**
 ```bash
 streamlit run app.py
 ```

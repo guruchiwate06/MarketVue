@@ -1,5 +1,5 @@
 """
-Unit and integration tests for MarketView backend reliability and error handling.
+Unit and integration tests for MarketVue backend reliability and error handling.
 All Gemini API calls are mocked with controlled exceptions and responses.
 Zero live API requests are made.
 """

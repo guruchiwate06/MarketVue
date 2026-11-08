@@ -502,7 +502,7 @@ A clean, institutional web interface has been developed in `app.py` to allow use
 
 ### A. Interface Design and Identity
 
-- **Application Title:** **MarketView**
+- **Application Title:** **MarketVue**
 - **Subtitle:** "An intelligent assistant for portfolio insights and financial analysis."
 - **Visual Styling:** Inspired by institutional financial-services design (deep corporate navy `#0f2b48`, crisp white cards `#ffffff`, slate borders `#e2e8f0`, and high-contrast typography).
 - **Independent Identity:** Strictly adheres to branding constraints with no proprietary logos, company references, or vendor branding in page titles, headers, footers, or sidebars.
