@@ -13,7 +13,7 @@ import pandas as pd
 # --------------------------------------------------
 
 st.set_page_config(
-    page_title="Portfolio Analytics",
+    page_title="MarketView",
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -182,7 +182,7 @@ with st.sidebar:
 
     st.markdown("---")
     st.markdown(
-        "<small style='color: #64748b;'>Portfolio Analytics Platform<br>Institutional Quantitative Research</small>",
+        "<small style='color: #64748b;'>MarketView Analytics Platform<br>Institutional Quantitative Research</small>",
         unsafe_allow_html=True
     )
 
@@ -193,7 +193,7 @@ with st.sidebar:
 
 st.markdown("""
 <div class="header-box">
-    <h1>Portfolio Analytics</h1>
+    <h1>MarketView</h1>
     <p>An intelligent assistant for portfolio insights and financial analysis.</p>
     <div class="status-badge">System Status: Connected to SQLite Engine | Quantitative Reasoning Active</div>
 </div>
