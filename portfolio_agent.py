@@ -154,7 +154,30 @@ def call_gemini(prompt, response_model):
 
         except Exception as error:
             err_str = str(error)
-            is_transient = "503" in err_str or "UNAVAILABLE" in err_str or "429" in err_str or "RESOURCE_EXHAUSTED" in err_str
+            is_quota = "RESOURCE_EXHAUSTED" in err_str or "429" in err_str
+
+            # If daily quota for current model is exhausted, automatically try backup model
+            if is_quota:
+                for alt_model in ["gemini-2.5-flash", "gemini-3.5-flash-lite"]:
+                    if alt_model != MODEL_NAME:
+                        try:
+                            alt_response = client.models.generate_content(
+                                model=alt_model,
+                                contents=prompt,
+                                config=types.GenerateContentConfig(
+                                    response_mime_type="application/json",
+                                    response_schema=response_model,
+                                    temperature=0
+                                )
+                            )
+                            if alt_response.parsed is not None:
+                                return response_model.model_validate(alt_response.parsed)
+                            if alt_response.text:
+                                return response_model.model_validate_json(alt_response.text)
+                        except Exception:
+                            pass
+
+            is_transient = "503" in err_str or "UNAVAILABLE" in err_str
             if is_transient and attempt < max_retries - 1:
                 time.sleep(3.0 * (attempt + 1))
                 continue
