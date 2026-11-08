@@ -96,7 +96,7 @@ _MIN_PACING_SECONDS = 3.0
 
 
 def call_gemini(prompt, response_model):
-    """Call Gemini and validate its structured response, with request pacing."""
+    """Call Gemini and validate its structured response, with request pacing and retry on transient errors."""
     global _LAST_CALL_TIMESTAMP
 
     if client is None:
@@ -104,52 +104,57 @@ def call_gemini(prompt, response_model):
             "GEMINI_API_KEY is missing. Check your .env file."
         )
 
-    # Ensure minimal pacing between consecutive Gemini calls to prevent 429
-    now = time.time()
-    elapsed = now - _LAST_CALL_TIMESTAMP
-    if elapsed < _MIN_PACING_SECONDS:
-        time.sleep(_MIN_PACING_SECONDS - elapsed)
+    max_retries = 3
+    for attempt in range(max_retries):
+        # Ensure minimal pacing between consecutive Gemini calls to prevent 429
+        now = time.time()
+        elapsed = now - _LAST_CALL_TIMESTAMP
+        if elapsed < _MIN_PACING_SECONDS:
+            time.sleep(_MIN_PACING_SECONDS - elapsed)
 
-    _LAST_CALL_TIMESTAMP = time.time()
+        _LAST_CALL_TIMESTAMP = time.time()
 
-    try:
-
-        response = client.models.generate_content(
-            model=MODEL_NAME,
-            contents=prompt,
-            config=types.GenerateContentConfig(
-                response_mime_type="application/json",
-                response_schema=response_model,
-                temperature=0
+        try:
+            response = client.models.generate_content(
+                model=MODEL_NAME,
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    response_mime_type="application/json",
+                    response_schema=response_model,
+                    temperature=0
+                )
             )
-        )
 
-        # Use the SDK's parsed response when available.
-        if response.parsed is not None:
-            return response_model.model_validate(response.parsed)
+            # Use the SDK's parsed response when available.
+            if response.parsed is not None:
+                return response_model.model_validate(response.parsed)
 
-        # Validate JSON text if parsed output is unavailable.
-        if not response.text:
-            raise ValueError("Gemini returned an empty response.")
+            # Validate JSON text if parsed output is unavailable.
+            if not response.text:
+                raise ValueError("Gemini returned an empty response.")
 
-        return response_model.model_validate_json(response.text)
+            return response_model.model_validate_json(response.text)
 
-    except ValidationError as error:
+        except ValidationError as error:
+            raise ValueError(
+                "Gemini returned data that did not match "
+                "the required response structure."
+            ) from error
 
-        raise ValueError(
-            "Gemini returned data that did not match "
-            "the required response structure."
-        ) from error
+        except ValueError:
+            raise
 
-    except ValueError:
-        raise
+        except Exception as error:
+            err_str = str(error)
+            is_transient = "503" in err_str or "UNAVAILABLE" in err_str or "429" in err_str or "RESOURCE_EXHAUSTED" in err_str
+            if is_transient and attempt < max_retries - 1:
+                time.sleep(3.0 * (attempt + 1))
+                continue
 
-    except Exception as error:
-
-        raise RuntimeError(
-            f"Gemini request failed "
-            f"({type(error).__name__}): {error}"
-        ) from error
+            raise RuntimeError(
+                f"Gemini request failed "
+                f"({type(error).__name__}): {error}"
+            ) from error
 
 
 # --------------------------------------------------
@@ -184,8 +189,11 @@ You route questions for a portfolio analytics application.
 Choose one tool:
 
 - sql: Database lookups, counts, filtering, joins,
-  aggregations and other database questions.
-- exposure_calculator: Sector exposure for a named portfolio.
+  aggregations, single sector queries, highest/lowest sector questions,
+  and all other database questions.
+- exposure_calculator: Full sector exposure breakdown for a single named portfolio.
+  Use sql if the question asks for a single specific sector, highest/lowest sector,
+  or compares sectors across portfolios.
 - unsupported: Requests outside these capabilities.
 
 AVAILABLE PORTFOLIO NAMES:
@@ -248,6 +256,21 @@ PORTFOLIO ANALYTICS RULES:
 
 - When presenting results for entities (portfolios, securities, sectors), select their natural names or symbols (portfolio_name, symbol, company_name, sector_name). Do not include internal surrogate ID columns (portfolio_id, security_id, sector_id) unless the user specifically asks for IDs.
 
+- When a question asks which entity has the highest or lowest metric (e.g. 'Which portfolio has the highest AUM?' or 'Which portfolio has the highest number of transactions?'), select both the entity identifier (e.g. portfolio_name) and the metric column or count being ranked (e.g. total_aum, transaction_count).
+
+- When asked to list securities held by a portfolio without requesting specific metrics, select `symbol` and `company_name`.
+
+- When asked to list portfolios satisfying a condition without requesting other fields, select `portfolio_name`.
+
+- When querying which portfolios satisfy a condition from a multi-row historical table (such as portfolio_performance or historical_prices), use DISTINCT (e.g. SELECT DISTINCT p.portfolio_name) to avoid repeating the portfolio name across multiple dates.
+
+- In `transactions`, `transaction_type` values are uppercase ('BUY', 'SELL') (e.g. `UPPER(transaction_type) = 'BUY'`).
+- In `portfolios`, `status` values are 'Active' and 'Passive' (e.g. `status = 'Active'`).
+
+- In portfolio_performance, total_return_* and max_drawdown are stored as numeric percentages (e.g. -10.0 represents -10%, not -0.10). When filtering for drawdowns worse than a threshold (like -10%), use `< -10.0`.
+
+- When displaying transactions, select standard transaction columns: `transaction_id, portfolio_name, symbol, transaction_type, quantity, price, transaction_date`.
+
 - When a question asks for an overall total or aggregate across all matching records (such as total AUM or total market value), compute the aggregate (e.g. SUM(total_aum)) without grouping by or selecting individual portfolio names.
 
 - To retrieve security symbols or company names for holdings,
@@ -281,9 +304,9 @@ PORTFOLIO ANALYTICS RULES:
 
 - When a question asks for a specific sector's value and what percentage it represents of total portfolio value for each portfolio:
   use two CTEs or subqueries: one to calculate that sector's value (joining holdings, securities, and sectors for that sector), and a second to calculate the total portfolio value across all holdings (joining portfolios, holdings, and securities without filtering or joining sectors so all holdings are counted in total value).
-  Join the two on portfolio_id and select:
-  portfolio_name, the sector value column (e.g. tech_value or sector_value), total_value, and the percentage (calculated as ROUND((sector_value / total_value) * 100, 2)),
-  ordered by percentage DESC. Do not include portfolio_id in the final SELECT.
+  INNER JOIN the two CTEs on portfolio_id (to include portfolios holding that sector) and select:
+  portfolio_name, tech_value (or <sector>_value), total_value, and tech_percentage (or <sector>_percentage, calculated as ROUND((tech_value / total_value) * 100, 2)),
+  ordered by tech_percentage DESC. Do not include portfolio_id in the final SELECT.
 
 RESULT ACCURACY:
 

@@ -1,0 +1,304 @@
+{
+  "questions": [
+    {
+      "id": 1,
+      "type": "text2sql",
+      "question": "What is the total AUM across all portfolios?",
+      "ground_truth": {
+        "sql_query": "SELECT SUM(total_aum) FROM portfolios;",
+        "expected_result_type": "single_value",
+        "explanation": "Total assets under management aggregated across all portfolios."
+      }
+    },
+    {
+      "id": 2,
+      "type": "text2sql",
+      "question": "List all portfolios along with their AUM.",
+      "ground_truth": {
+        "sql_query": "SELECT portfolio_name, total_aum FROM portfolios ORDER BY total_aum DESC;",
+        "expected_result_type": "table",
+        "explanation": "All portfolios with their respective AUM sorted in descending order."
+      }
+    },
+    {
+      "id": 3,
+      "type": "text2sql",
+      "question": "Which portfolio has the highest AUM?",
+      "ground_truth": {
+        "sql_query": "SELECT portfolio_name, total_aum FROM portfolios ORDER BY total_aum DESC LIMIT 1;",
+        "expected_result_type": "table",
+        "explanation": "The single portfolio with the maximum AUM."
+      }
+    },
+    {
+      "id": 4,
+      "type": "text2sql",
+      "question": "Which portfolio has the lowest AUM?",
+      "ground_truth": {
+        "sql_query": "SELECT portfolio_name, total_aum FROM portfolios ORDER BY total_aum ASC LIMIT 1;",
+        "expected_result_type": "table",
+        "explanation": "The single portfolio with the minimum AUM."
+      }
+    },
+    {
+      "id": 5,
+      "type": "text2sql",
+      "question": "How many portfolios are there in each status category?",
+      "ground_truth": {
+        "sql_query": "SELECT status, COUNT(*) as portfolio_count FROM portfolios GROUP BY status ORDER BY portfolio_count DESC;",
+        "expected_result_type": "table",
+        "explanation": "Count of portfolios grouped by status (Active and Passive)."
+      }
+    },
+    {
+      "id": 6,
+      "type": "text2sql",
+      "question": "List all securities held by Growth Equity Fund.",
+      "ground_truth": {
+        "sql_query": "SELECT s.symbol, s.company_name FROM holdings h JOIN securities s ON h.security_id = s.security_id JOIN portfolios p ON h.portfolio_id = p.portfolio_id WHERE p.portfolio_name = 'Growth Equity Fund' ORDER BY s.symbol;",
+        "expected_result_type": "table",
+        "explanation": "Distinct symbols and company names of securities held by Growth Equity Fund."
+      }
+    },
+    {
+      "id": 7,
+      "type": "text2sql",
+      "question": "Which portfolios currently hold Apple shares?",
+      "ground_truth": {
+        "sql_query": "SELECT DISTINCT p.portfolio_name FROM portfolios p JOIN holdings h ON p.portfolio_id = h.portfolio_id JOIN securities s ON h.security_id = s.security_id WHERE s.symbol = 'AAPL' ORDER BY p.portfolio_name;",
+        "expected_result_type": "list",
+        "explanation": "List of portfolio names holding AAPL shares."
+      }
+    },
+    {
+      "id": 8,
+      "type": "text2sql",
+      "question": "Which security has the highest current market price?",
+      "ground_truth": {
+        "sql_query": "SELECT symbol, company_name, current_price FROM securities ORDER BY current_price DESC LIMIT 1;",
+        "expected_result_type": "table",
+        "explanation": "Security with the highest current_price in the securities table."
+      }
+    },
+    {
+      "id": 9,
+      "type": "text2sql",
+      "question": "Which portfolio has the highest number of equity holdings?",
+      "ground_truth": {
+        "sql_query": "SELECT p.portfolio_name, COUNT(h.holding_id) as holding_count FROM portfolios p JOIN holdings h ON p.portfolio_id = h.portfolio_id JOIN securities s ON h.security_id = s.security_id WHERE s.asset_type = 'Stock' GROUP BY p.portfolio_id, p.portfolio_name ORDER BY holding_count DESC LIMIT 1;",
+        "expected_result_type": "table",
+        "explanation": "Portfolio having the largest count of stock holdings."
+      }
+    },
+    {
+      "id": 10,
+      "type": "text2sql",
+      "question": "What is the total cost basis of holdings in Tech Innovation Fund?",
+      "ground_truth": {
+        "sql_query": "SELECT SUM(h.cost_basis) as total_cost_basis FROM holdings h JOIN portfolios p ON h.portfolio_id = p.portfolio_id WHERE p.portfolio_name = 'Tech Innovation Fund';",
+        "expected_result_type": "single_value",
+        "explanation": "Sum of cost_basis across all holdings in Tech Innovation Fund."
+      }
+    },
+    {
+      "id": 11,
+      "type": "text2sql",
+      "question": "Which sector has the highest exposure in Growth Equity Fund?",
+      "ground_truth": {
+        "sql_query": "SELECT sec.sector_name, SUM(h.current_weight) as exposure FROM holdings h JOIN securities s ON h.security_id = s.security_id JOIN sectors sec ON s.sector_id = sec.sector_id JOIN portfolios p ON h.portfolio_id = p.portfolio_id WHERE p.portfolio_name = 'Growth Equity Fund' AND s.asset_type = 'Stock' GROUP BY sec.sector_name ORDER BY exposure DESC LIMIT 1;",
+        "expected_result_type": "table",
+        "explanation": "The sector with the largest equity weight in Growth Equity Fund."
+      }
+    },
+    {
+      "id": 12,
+      "type": "text2sql",
+      "question": "Which sector has the lowest exposure in Balanced Portfolio?",
+      "ground_truth": {
+        "sql_query": "SELECT sec.sector_name, SUM(h.current_weight) as exposure FROM holdings h JOIN securities s ON h.security_id = s.security_id JOIN sectors sec ON s.sector_id = sec.sector_id JOIN portfolios p ON h.portfolio_id = p.portfolio_id WHERE p.portfolio_name = 'Balanced Portfolio' AND s.asset_type = 'Stock' GROUP BY sec.sector_name ORDER BY exposure ASC LIMIT 1;",
+        "expected_result_type": "table",
+        "explanation": "The sector with the smallest equity weight in Balanced Portfolio."
+      }
+    },
+    {
+      "id": 13,
+      "type": "text2sql",
+      "question": "What is the Technology sector holding weight in each portfolio?",
+      "ground_truth": {
+        "sql_query": "SELECT p.portfolio_name, ROUND(COALESCE(SUM(CASE WHEN sec.sector_name = 'Technology' AND s.asset_type = 'Stock' THEN h.current_weight ELSE 0.0 END), 0.0), 2) as tech_exposure FROM portfolios p LEFT JOIN holdings h ON p.portfolio_id = h.portfolio_id LEFT JOIN securities s ON h.security_id = s.security_id LEFT JOIN sectors sec ON s.sector_id = sec.sector_id GROUP BY p.portfolio_id, p.portfolio_name ORDER BY tech_exposure DESC, p.portfolio_name;",
+        "expected_result_type": "table",
+        "explanation": "Technology equity exposure percentage weight for every portfolio."
+      }
+    },
+    {
+      "id": 14,
+      "type": "text2sql",
+      "question": "How many distinct sectors does each portfolio have exposure to?",
+      "ground_truth": {
+        "sql_query": "SELECT p.portfolio_name, COUNT(DISTINCT sec.sector_id) as sector_count FROM portfolios p LEFT JOIN holdings h ON p.portfolio_id = h.portfolio_id LEFT JOIN securities s ON h.security_id = s.security_id AND s.asset_type = 'Stock' LEFT JOIN sectors sec ON s.sector_id = sec.sector_id GROUP BY p.portfolio_id, p.portfolio_name ORDER BY sector_count DESC, p.portfolio_name;",
+        "expected_result_type": "table",
+        "explanation": "Count of distinct equity sectors held in each portfolio."
+      }
+    },
+    {
+      "id": 15,
+      "type": "text2sql",
+      "question": "Which portfolios have no equity holdings?",
+      "ground_truth": {
+        "sql_query": "SELECT p.portfolio_name FROM portfolios p WHERE p.portfolio_id NOT IN (SELECT DISTINCT h.portfolio_id FROM holdings h JOIN securities s ON h.security_id = s.security_id WHERE s.asset_type = 'Stock') ORDER BY p.portfolio_name;",
+        "expected_result_type": "list",
+        "explanation": "Portfolios that hold zero stocks (bond-only funds)."
+      }
+    },
+    {
+      "id": 16,
+      "type": "text2sql",
+      "question": "List portfolios with a high target risk level.",
+      "ground_truth": {
+        "sql_query": "SELECT portfolio_name FROM portfolios WHERE target_risk_level = 'High' ORDER BY portfolio_name;",
+        "expected_result_type": "list",
+        "explanation": "Portfolios configured with High target risk level."
+      }
+    },
+    {
+      "id": 17,
+      "type": "text2sql",
+      "question": "Which portfolio has the highest recorded volatility?",
+      "ground_truth": {
+        "sql_query": "SELECT p.portfolio_name, MAX(pp.volatility) as max_volatility FROM portfolios p JOIN portfolio_performance pp ON p.portfolio_id = pp.portfolio_id GROUP BY p.portfolio_id, p.portfolio_name ORDER BY max_volatility DESC LIMIT 1;",
+        "expected_result_type": "table",
+        "explanation": "Portfolio with the maximum recorded historical volatility."
+      }
+    },
+    {
+      "id": 18,
+      "type": "text2sql",
+      "question": "What is the average beta across all portfolios?",
+      "ground_truth": {
+        "sql_query": "SELECT AVG(beta) as avg_beta FROM risk_metrics;",
+        "expected_result_type": "single_value",
+        "explanation": "Average portfolio market beta calculated across risk metric records."
+      }
+    },
+    {
+      "id": 19,
+      "type": "text2sql",
+      "question": "Which portfolios have a Sharpe ratio greater than 1?",
+      "ground_truth": {
+        "sql_query": "SELECT DISTINCT p.portfolio_name FROM portfolios p JOIN portfolio_performance pp ON p.portfolio_id = pp.portfolio_id WHERE pp.sharpe_ratio > 1.0 ORDER BY p.portfolio_name;",
+        "expected_result_type": "list",
+        "explanation": "Distinct portfolios with historical Sharpe ratio above 1.0."
+      }
+    },
+    {
+      "id": 20,
+      "type": "text2sql",
+      "question": "Compare the average beta and tracking error between Growth Equity Fund and Conservative Income Fund.",
+      "ground_truth": {
+        "sql_query": "SELECT p.portfolio_name, AVG(rm.beta) as avg_beta, AVG(rm.tracking_error) as avg_tracking_error FROM portfolios p JOIN risk_metrics rm ON p.portfolio_id = rm.portfolio_id WHERE p.portfolio_name IN ('Growth Equity Fund', 'Conservative Income Fund') GROUP BY p.portfolio_name ORDER BY p.portfolio_name;",
+        "expected_result_type": "table",
+        "explanation": "Average beta and tracking error compared across the two funds."
+      }
+    },
+    {
+      "id": 21,
+      "type": "text2sql",
+      "question": "Which portfolio has the highest recorded 1-year return?",
+      "ground_truth": {
+        "sql_query": "SELECT p.portfolio_name, MAX(pp.total_return_1y) as max_return_1y FROM portfolios p JOIN portfolio_performance pp ON p.portfolio_id = pp.portfolio_id GROUP BY p.portfolio_id, p.portfolio_name ORDER BY max_return_1y DESC LIMIT 1;",
+        "expected_result_type": "table",
+        "explanation": "Portfolio with highest 1-year return recorded in portfolio_performance."
+      }
+    },
+    {
+      "id": 22,
+      "type": "text2sql",
+      "question": "Which portfolio has the lowest recorded 1-year return?",
+      "ground_truth": {
+        "sql_query": "SELECT p.portfolio_name, MIN(pp.total_return_1y) as min_return_1y FROM portfolios p JOIN portfolio_performance pp ON p.portfolio_id = pp.portfolio_id GROUP BY p.portfolio_id, p.portfolio_name ORDER BY min_return_1y ASC LIMIT 1;",
+        "expected_result_type": "table",
+        "explanation": "Portfolio with lowest 1-year return recorded in portfolio_performance."
+      }
+    },
+    {
+      "id": 23,
+      "type": "text2sql",
+      "question": "What is the average recorded 1-year portfolio return?",
+      "ground_truth": {
+        "sql_query": "SELECT AVG(total_return_1y) as avg_return_1y FROM portfolio_performance;",
+        "expected_result_type": "single_value",
+        "explanation": "Average of total_return_1y across all historical performance records."
+      }
+    },
+    {
+      "id": 24,
+      "type": "text2sql",
+      "question": "Which benchmark index is associated with each portfolio?",
+      "ground_truth": {
+        "sql_query": "SELECT portfolio_name, benchmark_index FROM portfolios ORDER BY portfolio_name;",
+        "expected_result_type": "table",
+        "explanation": "Mapping of each portfolio to its benchmark index symbol."
+      }
+    },
+    {
+      "id": 25,
+      "type": "text2sql",
+      "question": "Which portfolios have a recorded maximum drawdown worse than -10%?",
+      "ground_truth": {
+        "sql_query": "SELECT DISTINCT p.portfolio_name FROM portfolios p JOIN portfolio_performance pp ON p.portfolio_id = pp.portfolio_id WHERE pp.max_drawdown < -10.0 ORDER BY p.portfolio_name;",
+        "expected_result_type": "list",
+        "explanation": "Portfolios with any recorded drawdown exceeding 10% decline."
+      }
+    },
+    {
+      "id": 26,
+      "type": "text2sql",
+      "question": "How many transactions does each portfolio have?",
+      "ground_truth": {
+        "sql_query": "SELECT p.portfolio_name, COUNT(t.transaction_id) as transaction_count FROM portfolios p LEFT JOIN transactions t ON p.portfolio_id = t.portfolio_id GROUP BY p.portfolio_id, p.portfolio_name ORDER BY transaction_count DESC, p.portfolio_name;",
+        "expected_result_type": "table",
+        "explanation": "Count of transactions for every portfolio."
+      }
+    },
+    {
+      "id": 27,
+      "type": "text2sql",
+      "question": "Which portfolio has the highest number of transactions?",
+      "ground_truth": {
+        "sql_query": "SELECT p.portfolio_name, COUNT(t.transaction_id) as transaction_count FROM portfolios p JOIN transactions t ON p.portfolio_id = t.portfolio_id GROUP BY p.portfolio_id, p.portfolio_name ORDER BY transaction_count DESC LIMIT 1;",
+        "expected_result_type": "table",
+        "explanation": "Portfolio with the greatest count of trade transactions."
+      }
+    },
+    {
+      "id": 28,
+      "type": "text2sql",
+      "question": "What is the total purchase value of transactions across all portfolios?",
+      "ground_truth": {
+        "sql_query": "SELECT SUM(quantity * price) as total_purchase_value FROM transactions WHERE UPPER(transaction_type) = 'BUY';",
+        "expected_result_type": "single_value",
+        "explanation": "Sum of quantity * price for all BUY transactions across all portfolios."
+      }
+    },
+    {
+      "id": 29,
+      "type": "text2sql",
+      "question": "Show the five most recent transactions.",
+      "ground_truth": {
+        "sql_query": "SELECT t.transaction_id, p.portfolio_name, s.symbol, t.transaction_type, t.quantity, t.price, t.transaction_date FROM transactions t JOIN portfolios p ON t.portfolio_id = p.portfolio_id JOIN securities s ON t.security_id = s.security_id ORDER BY t.transaction_date DESC, t.transaction_id DESC LIMIT 5;",
+        "expected_result_type": "table",
+        "explanation": "Five most recent transactions with standard transaction detail columns."
+      }
+    },
+    {
+      "id": 30,
+      "type": "text2sql",
+      "question": "Which security appears in the highest number of transactions?",
+      "ground_truth": {
+        "sql_query": "SELECT s.symbol, s.company_name, COUNT(t.transaction_id) as transaction_count FROM transactions t JOIN securities s ON t.security_id = s.security_id GROUP BY s.security_id, s.symbol, s.company_name ORDER BY transaction_count DESC LIMIT 1;",
+        "expected_result_type": "table",
+        "explanation": "Security involved in the largest number of transaction records."
+      }
+    }
+  ]
+}

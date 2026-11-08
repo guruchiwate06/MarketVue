@@ -399,4 +399,100 @@ python portfolio_agent.py
 python evaluate.py
 ```
 
+### Running the Extended 30-Question Evaluation Suite
+```bash
+python evaluate_extended.py
+```
+
+---
+
+## 14. Extended Evaluation Benchmark (30 Questions)
+
+To rigorously test the capabilities and generalizability of the Portfolio Analytics Agent beyond the official 10 questions, an extended benchmark dataset of 30 additional questions was designed and executed.
+
+### A. Dataset Design and Database Validation
+
+The 30 questions are organized into 6 distinct analytical categories (5 questions each). Prior to execution, every question was validated against the actual SQLite database schema and records in `portfolio.db`.
+
+#### Category A: Portfolio Information
+1. **Q1:** What is the total AUM across all portfolios? (`SUM(total_aum)`)
+2. **Q2:** List all portfolios along with their AUM. (`portfolio_name, total_aum`)
+3. **Q3:** Which portfolio has the highest AUM? (`ORDER BY total_aum DESC LIMIT 1`)
+4. **Q4:** Which portfolio has the lowest AUM? (`ORDER BY total_aum ASC LIMIT 1`)
+5. **Q5:** How many portfolios are there in each status category? (`GROUP BY status`)
+   - *Data validation note:* The database only contains status values `'Active'` (10) and `'Passive'` (3); there is no `'Inactive'` status. The question was formulated to group by status categories.
+
+#### Category B: Holdings and Securities
+6. **Q6:** List all securities held by Growth Equity Fund. (`symbol, company_name`)
+7. **Q7:** Which portfolios currently hold Apple shares? (`DISTINCT portfolio_name WHERE symbol = 'AAPL'`)
+8. **Q8:** Which security has the highest current market price? (`ORDER BY current_price DESC LIMIT 1`)
+9. **Q9:** Which portfolio has the highest number of equity holdings? (`COUNT(h.holding_id) WHERE asset_type = 'Stock'`)
+10. **Q10:** What is the total cost basis of holdings in Tech Innovation Fund? (`SUM(cost_basis)`)
+
+#### Category C: Sector Exposure
+11. **Q11:** Which sector has the highest exposure in Growth Equity Fund?
+12. **Q12:** Which sector has the lowest exposure in Balanced Portfolio?
+    - *Data validation note:* The originally suggested question targeted Tech Innovation Fund, which holds 100% Technology and 0% other sectors. Balanced Portfolio was used instead as it holds diverse sectors (Healthcare lowest at 6%).
+13. **Q13:** What is the Technology sector holding weight in each portfolio?
+14. **Q14:** How many distinct sectors does each portfolio have exposure to?
+15. **Q15:** Which portfolios have no equity holdings? (Identifies fixed income funds).
+
+#### Category D: Risk Analysis
+16. **Q16:** List portfolios with a high target risk level. (`WHERE target_risk_level = 'High'`)
+17. **Q17:** Which portfolio has the highest recorded volatility? (`MAX(volatility)`)
+18. **Q18:** What is the average beta across all portfolios? (`AVG(beta)`)
+19. **Q19:** Which portfolios have a Sharpe ratio greater than 1? (`DISTINCT portfolio_name WHERE sharpe_ratio > 1.0`)
+20. **Q20:** Compare the average beta and tracking error between Growth Equity Fund and Conservative Income Fund.
+
+#### Category E: Performance and Benchmarks
+21. **Q21:** Which portfolio has the highest recorded 1-year return? (`MAX(total_return_1y)`)
+22. **Q22:** Which portfolio has the lowest recorded 1-year return? (`MIN(total_return_1y)`)
+23. **Q23:** What is the average recorded 1-year portfolio return? (`AVG(total_return_1y)`)
+24. **Q24:** Which benchmark index is associated with each portfolio?
+    - *Data validation note:* The `benchmarks` table contains benchmark metadata (name, symbol, description) but zero historical price/return time series. Benchmark return comparison is not possible in this schema. Therefore, the question retrieves the portfolio-to-benchmark index mapping (`portfolio_name, benchmark_index`).
+25. **Q25:** Which portfolios have a recorded maximum drawdown worse than -10%?
+    - *Data validation note:* Tech Innovation Fund is the only fund with drawdowns worse than -10.0% (-12.5% max drawdown).
+
+#### Category F: Transaction Analysis
+26. **Q26:** How many transactions does each portfolio have? (`COUNT(t.transaction_id) GROUP BY p.portfolio_id`)
+27. **Q27:** Which portfolio has the highest number of transactions? (`ORDER BY transaction_count DESC LIMIT 1`)
+28. **Q28:** What is the total purchase value of transactions across all portfolios? (`SUM(quantity * price) WHERE UPPER(transaction_type) = 'BUY'`)
+29. **Q29:** Show the five most recent transactions. (`ORDER BY transaction_date DESC LIMIT 5`)
+30. **Q30:** Which security appears in the highest number of transactions? (`AAPL` with 4 transactions).
+
+---
+
+### B. Extended Evaluation Execution and Raw Results
+
+The evaluation script `evaluate_extended.py` was executed directly against `extended_test_dataset.json` with live LLM queries, without manual intervention or forced answers:
+
+```
+========== EXTENDED PORTFOLIO AGENT EVALUATION (30 Questions) ==========
+Total questions: 30
+Passed: 26
+Failed: 4
+Agent errors: 0
+Reference errors: 0
+Skipped: 0
+Agent accuracy: 86.67%
+=================================================
+```
+
+#### Detailed Breakdown of the 4 Failed Cases
+
+| Question ID | Question Text | Cause of Failure | Financial / SQL Reason |
+|:---|:---|:---|:---|
+| **Q11** | Which sector has the highest exposure in Growth Equity Fund? | Value metric mismatch | The agent computed exposure as dollar market value (`$1,866,148.0`), whereas the reference query computed exposure as percentage weight (`0.93` or 93%). Both are valid interpretations of "exposure" in finance. |
+| **Q12** | Which sector has the lowest exposure in Balanced Portfolio? | Value metric mismatch | Similar to Q11, the agent computed dollar exposure (`$165,800.0`), whereas the reference query expected weight exposure (`0.06` or 6%). |
+| **Q13** | What is the Technology sector holding weight in each portfolio? | Column count mismatch | The agent returned 4 columns (`technology_value`, `total_value`, `technology_percentage`), matching the comprehensive sector percentage rule, while the reference query expected a 2-column format (`portfolio_name`, `tech_exposure`). |
+| **Q14** | How many distinct sectors does each portfolio have exposure to? | Row count mismatch | The agent used an inner join (`JOIN sectors`), which returned the 11 portfolios with equity sectors, omitting the 2 bond funds that hold 0 equity sectors. The reference query used a `LEFT JOIN` returning 13 rows. |
+
+### C. Comparison with Official Benchmark
+
+| Benchmark Suite | Script | Test Cases | Accuracy | Notes |
+|:---|:---|:---:|:---:|:---|
+| **Official Ground Truth** | `evaluate.py` | 10 | **100.00% (10/10)** | Official assignment benchmark covering SQL tool, CTE aggregations, and Exposure Calculator. |
+| **Extended Evaluation** | `evaluate_extended.py` | 30 | **86.67% (26/30)** | Completely unforced test covering 6 diverse categories across 30 natural language queries. |
+
+
 
