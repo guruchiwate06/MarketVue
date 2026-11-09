@@ -31,12 +31,56 @@ from dotenv import load_dotenv
 # Load local environment variables from .env
 load_dotenv()
 
-# Silently load API key from Streamlit secrets if deployed
-try:
-    if hasattr(st, "secrets") and "GEMINI_API_KEY" in st.secrets and st.secrets["GEMINI_API_KEY"]:
-        os.environ["GEMINI_API_KEY"] = st.secrets["GEMINI_API_KEY"]
-except Exception:
-    pass
+secrets_format_error = None
+
+def resolve_api_key():
+    """
+    Search environment variables and Streamlit Secrets across all standard candidate names,
+    casing variations, and nested TOML sections.
+    """
+    global secrets_format_error
+
+    # 1. Environment variables
+    for env_name in ["GEMINI_API_KEY", "GOOGLE_API_KEY", "GEMINI_KEY", "API_KEY"]:
+        val = os.getenv(env_name)
+        if val and val.strip():
+            return val.strip()
+
+    # 2. Streamlit secrets
+    try:
+        if hasattr(st, "secrets"):
+            # Check direct candidate keys
+            candidate_keys = [
+                "GEMINI_API_KEY", "gemini_api_key", "Gemini_Api_Key",
+                "GOOGLE_API_KEY", "google_api_key", "Google_Api_Key",
+                "GEMINI_KEY", "gemini_key",
+                "API_KEY", "api_key"
+            ]
+            for candidate in candidate_keys:
+                if candidate in st.secrets:
+                    val = str(st.secrets[candidate]).strip()
+                    if val:
+                        return val
+
+            # Check nested sections like [general] or [gemini]
+            for sec_k, sec_v in st.secrets.items():
+                if isinstance(sec_v, str) and sec_v.strip() and any(x in sec_k.lower() for x in ["gemini", "google", "api"]):
+                    return sec_v.strip()
+                elif hasattr(sec_v, "items"):
+                    for sub_k, sub_v in sec_v.items():
+                        if isinstance(sub_v, str) and sub_v.strip() and any(x in sub_k.lower() for x in ["gemini", "google", "api", "key"]):
+                            return sub_v.strip()
+    except Exception as exc:
+        err_msg = str(exc)
+        if any(term in err_msg.lower() for term in ["toml", "decode", "syntax", "parse"]):
+            secrets_format_error = f"Secrets format error: Ensure format is GEMINI_API_KEY = \"your_key\" (using an '=' and double quotes)."
+
+    return ""
+
+# Pre-populate os.environ with resolved key
+_discovered_key = resolve_api_key()
+if _discovered_key:
+    os.environ["GEMINI_API_KEY"] = _discovered_key
 
 # Ensure SQLite database is created from CSV datasets if deployed without portfolio.db
 def ensure_database():
@@ -202,7 +246,11 @@ if "conversation_history" not in st.session_state:
 if "pending_question" not in st.session_state:
     st.session_state.pending_question = None
 
-current_key_present = bool(os.getenv("GEMINI_API_KEY"))
+# Dynamically resolve key on every run
+active_key = resolve_api_key()
+current_key_present = bool(active_key)
+if active_key:
+    os.environ["GEMINI_API_KEY"] = active_key
 
 if "gemini_status" not in st.session_state:
     if current_key_present:
@@ -213,7 +261,7 @@ else:
     # Dynamically update if key was added or removed
     if current_key_present and "Unconfigured" in st.session_state.gemini_status:
         st.session_state.gemini_status = "Standby (Key detected, unverified)"
-    elif not current_key_present:
+    elif not current_key_present and "Standby" in st.session_state.gemini_status:
         st.session_state.gemini_status = "Unconfigured (API key missing)"
 
 if "question_count" not in st.session_state:
@@ -238,8 +286,10 @@ with st.sidebar:
     if "Quota Exhausted" in st.session_state.gemini_status:
         st.warning("Gemini API free-tier quota is currently exhausted. Natural-language AI reasoning is temporarily paused; direct database queries remain operational.")
 
-    if not current_key_present:
-        st.info("API Key Setup: To enable AI reasoning, configure GEMINI_API_KEY in your local .env file or Streamlit Cloud Secrets.")
+    if secrets_format_error:
+        st.error(secrets_format_error)
+    elif not current_key_present:
+        st.info("API Key Setup: In Streamlit Cloud, go to App Settings > Secrets and add:\n\nGEMINI_API_KEY = \"your_api_key\"")
 
     st.markdown("---")
     st.markdown("### Portfolio Dataset")

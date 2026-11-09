@@ -20,15 +20,41 @@ from exposure_calculator import calculate_sector_exposure
 
 load_dotenv()
 
-# Discover Streamlit secrets if running inside a Streamlit deployment
-try:
-    import streamlit as _st
-    if hasattr(_st, "secrets") and "GEMINI_API_KEY" in _st.secrets and not os.getenv("GEMINI_API_KEY"):
-        os.environ["GEMINI_API_KEY"] = _st.secrets["GEMINI_API_KEY"]
-except Exception:
-    pass
+def get_api_key():
+    """Retrieve Gemini API key from environment or Streamlit Secrets."""
+    for env_name in ["GEMINI_API_KEY", "GOOGLE_API_KEY", "GEMINI_KEY", "API_KEY"]:
+        val = os.getenv(env_name)
+        if val and val.strip():
+            return val.strip()
 
-API_KEY = os.getenv("GEMINI_API_KEY")
+    try:
+        import streamlit as _st
+        if hasattr(_st, "secrets"):
+            for candidate in [
+                "GEMINI_API_KEY", "gemini_api_key", "Gemini_Api_Key",
+                "GOOGLE_API_KEY", "google_api_key", "API_KEY", "api_key"
+            ]:
+                if candidate in _st.secrets and str(_st.secrets[candidate]).strip():
+                    key = str(_st.secrets[candidate]).strip()
+                    os.environ["GEMINI_API_KEY"] = key
+                    return key
+            for k, v in _st.secrets.items():
+                if isinstance(v, str) and v.strip() and any(x in k.lower() for x in ["gemini", "google", "api"]):
+                    key = v.strip()
+                    os.environ["GEMINI_API_KEY"] = key
+                    return key
+                elif hasattr(v, "items"):
+                    for sub_k, sub_v in v.items():
+                        if isinstance(sub_v, str) and sub_v.strip() and any(x in sub_k.lower() for x in ["gemini", "google", "api", "key"]):
+                            key = sub_v.strip()
+                            os.environ["GEMINI_API_KEY"] = key
+                            return key
+    except Exception:
+        pass
+
+    return ""
+
+API_KEY = get_api_key()
 ACTIVE_MODELS = [
     os.getenv("GEMINI_MODEL", "gemini-3.5-flash"),
     "gemini-3.1-flash-lite",
@@ -188,12 +214,12 @@ def call_gemini(prompt, response_model):
     global client, API_KEY, _LAST_CALL_TIMESTAMP
 
     if client is None:
-        API_KEY = os.getenv("GEMINI_API_KEY")
+        API_KEY = get_api_key()
         if API_KEY:
             client = genai.Client(api_key=API_KEY)
         else:
             raise GeminiAPIException(
-                "GEMINI_API_KEY is not configured. Check your .env file or application configuration.",
+                "GEMINI_API_KEY is not configured. Check your .env file or Streamlit Cloud Secrets.",
                 error_type="missing_api_key"
             )
 
@@ -455,8 +481,12 @@ def generate_reasoning(question, tool, status, query="", data=None) -> Reasoning
     Never invents facts or financial conclusions when Gemini is unavailable.
     """
     global client, API_KEY
-    if client is None and not os.getenv("GEMINI_API_KEY"):
-        return ReasoningResult("", status="unconfigured", error="Gemini API key is not configured.")
+    if client is None:
+        API_KEY = get_api_key()
+        if API_KEY:
+            client = genai.Client(api_key=API_KEY)
+        else:
+            return ReasoningResult("", status="unconfigured", error="Gemini API key is not configured.")
 
     data_summary = ""
     if tool == "sql":
