@@ -122,15 +122,24 @@ python portfolio_agent.py
 
 ---
 
-## Benchmark Evaluation
+## Evaluation & Testing Summary
 
-The system includes automated evaluation scripts to verify SQL generation and calculation accuracy:
+The system's capabilities have been tested across both functional benchmark datasets and offline unit/reliability test suites:
 
-- **Official Benchmark (10 questions)**: 10/10 passed (100%)
-- **Extended Test Suite (30 questions)**: 26/30 passed (86.67%)
+- **Official Benchmark (10 questions)**: 10/10 passed (100% recorded accuracy across basic and intermediate SQL & exposure routing).
+- **Extended Test Suite (30 questions)**: 26/30 passed (86.67% recorded accuracy across 6 analytical categories).
+- **Offline Reliability Test Suite (22 unit tests)**: 22/22 tests passing in `test_reliability.py`, validating:
+  - Error classification across quota exhaustion, authentication failures, network timeouts, and missing API keys.
+  - Non-destructive failure isolation (preserving SQL results and deterministic sector exposure when dynamic reasoning is paused).
+  - SQL security barriers (prohibiting DML/DDL modifications, blocking `sqlite_master` probes, rejecting multi-statement queries).
+  - Session question limit counters (threshold warning at 7 queries, blocking at 10 queries).
 
-Run the benchmarks:
+Run the tests:
 ```bash
+# Offline reliability and security suite (zero API calls)
+python -m unittest test_reliability.py
+
+# Benchmark evaluation scripts (require active Gemini API credentials)
 python evaluate.py
 python evaluate_extended.py
 ```
@@ -139,8 +148,9 @@ python evaluate_extended.py
 
 ## Session Usage Limits & API Protection
 
-Because MarketVue is a publicly accessible demonstration repository, a per-session question limit is enforced to prevent shared Gemini API quota exhaustion:
+Because MarketVue is deployed as a publicly accessible demonstration application sharing a common API credential, a per-session limit is enforced:
 
-- **Limit**: Maximum of 10 AI-powered questions per Streamlit session.
+- **Per-Session Limit**: Maximum of 10 AI-powered queries per Streamlit browser session.
 - **Warning Threshold**: A warning notice appears after question 7, displaying remaining queries.
-- **Limit Enforcement**: After question 10, additional AI queries are disabled while full access to portfolio data, dataframes, and prior results is preserved.
+- **Graceful Blocking**: After question 10, new AI queries are paused. Users retain full access to dashboard metrics, dataset tables, and previously answered query results.
+- **Scope & Limitations**: This limit is an in-memory session-state control designed to prevent runaway automated loops from a single client. It is not a global quota management system and does not protect against concurrent usage across separate independent sessions.

@@ -288,16 +288,21 @@ with st.sidebar:
         with st.popover("ℹ️", help="Click to see session query limit details"):
             st.markdown("#### Session Query Limit Policy")
             st.markdown(
-                f"Each session is allocated a maximum of **{MAX_SESSION_QUESTIONS} AI-powered questions**.\n\n"
+                f"Each user session allows up to **{MAX_SESSION_QUESTIONS} AI-powered questions**.\n\n"
                 "**Why is this limit enforced?**\n"
-                "- MarketVue is hosted as a public showcase application.\n"
-                "- Repetitive or unnecessary AI calls can rapidly exhaust the shared Gemini API quota, preventing other visitors from exploring the agent.\n"
-                "- A warning appears after **7 queries**; AI query generation is disabled after **10 queries**.\n\n"
-                "All local database calculations, portfolio tables, and previous question results remain fully accessible even after reaching the limit."
+                "- MarketVue is hosted as a public showcase application with shared Gemini API credentials.\n"
+                "- This per-session limit helps prevent accidental or repetitive query loops from quickly consuming the API quota.\n"
+                "- *Note:* This is a client-side session control and does not guarantee global API quota availability if multiple users query concurrently.\n"
+                "- A warning appears after **7 queries**; new AI query generation is paused after **10 queries**.\n\n"
+                "All portfolio data, dashboard statistics, and previously generated session results remain fully accessible."
             )
 
     if "Quota Exhausted" in st.session_state.gemini_status:
-        st.warning("Gemini API free-tier quota is currently exhausted. Natural-language AI reasoning is temporarily paused; direct database queries remain operational.")
+        st.warning(
+            "Gemini API quota is currently exhausted. New natural-language AI queries and reasoning "
+            "are temporarily paused. Existing dashboard metrics, portfolio dataset statistics, and previously "
+            "retrieved results remain fully accessible."
+        )
 
     if secrets_format_error:
         st.error(secrets_format_error)
@@ -380,9 +385,10 @@ with info_btn_col:
         st.markdown(
             f"Each user session allows up to **{MAX_SESSION_QUESTIONS} AI queries**.\n\n"
             "**Why is this limit enforced?**\n"
-            "- MarketVue is hosted on a public demonstration environment.\n"
-            "- Excessive or unnecessary queries quickly exhaust the shared Gemini API quota, which blocks other visitors from testing.\n"
-            "- A warning is shown after **7 questions**, and AI questions are paused after **10 questions**.\n\n"
+            "- MarketVue is hosted on a public demonstration environment sharing API quota.\n"
+            "- The per-session cap prevents individual sessions from running excessive automated or repetitive loops.\n"
+            "- *Note:* This per-session limit does not provide a global quota guarantee against concurrent multi-user traffic.\n"
+            "- A warning is shown after **7 questions**, and new AI queries are paused after **10 questions**.\n\n"
             "You can always view all database tables, previous question results, and calculations even after reaching the limit."
         )
 
@@ -503,7 +509,10 @@ def render_result_entry(item, is_latest=False):
     r_status = result.get("reasoning_status")
     if not explanation and r_status and r_status != "success":
         if r_status == "quota_exhausted":
-            st.info("AI Reasoning Notice: Natural-language reasoning is temporarily unavailable due to Gemini API free-tier quota exhaustion. Underlying data results are presented below.")
+            st.info(
+                "AI Reasoning Notice: Natural-language reasoning is temporarily unavailable due to Gemini API quota limits. "
+                "The structured query data results retrieved from the database are presented below."
+            )
         elif r_status == "auth_error":
             st.warning("AI Reasoning Notice: Natural-language reasoning is unavailable due to an API authentication failure.")
         elif r_status == "network_error":
@@ -517,7 +526,11 @@ def render_result_entry(item, is_latest=False):
         tool = result.get("tool")
 
         if err_type == "quota_exhausted":
-            st.warning("API Quota Notice: The Gemini API free-tier quota is currently exhausted. Natural-language query translation is temporarily paused. Underlying SQLite data and calculations remain intact.")
+            st.warning(
+                "API Quota Notice: The Gemini API quota is currently exhausted. New natural-language queries "
+                "cannot be translated into SQL while the API is unavailable. Previously generated session results, "
+                "database metrics, and portfolio datasets remain fully accessible below."
+            )
         elif err_type == "auth_error":
             st.error("Authentication Error: The Gemini API rejected the credentials. Please verify your GEMINI_API_KEY.")
         elif err_type == "network_error":

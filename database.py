@@ -7,132 +7,22 @@ BASE_DIR = Path(__file__).resolve().parent
 DB_PATH = BASE_DIR / "portfolio.db"
 DATA_DIR = BASE_DIR / "data"
 
-TABLES = {
-    "benchmarks": """
-        CREATE TABLE IF NOT EXISTS benchmarks (
-            benchmark_id INTEGER PRIMARY KEY,
-            benchmark_name TEXT,
-            benchmark_symbol TEXT,
-            benchmark_type TEXT,
-            description TEXT,
-            inception_date TEXT
-        )
-    """,
+# --------------------------------------------------
+# Database Schema & Loading Order
+# --------------------------------------------------
 
-    "historical_prices": """
-        CREATE TABLE IF NOT EXISTS historical_prices (
-            price_id INTEGER PRIMARY KEY,
-            security_id INTEGER,
-            price_date TEXT,
-            open_price REAL,
-            high_price REAL,
-            low_price REAL,
-            close_price REAL,
-            volume INTEGER,
-            adjusted_close REAL
-        )
-    """,
-
-    "holdings": """
-        CREATE TABLE IF NOT EXISTS holdings (
-            holding_id INTEGER PRIMARY KEY,
-            portfolio_id INTEGER,
-            security_id INTEGER,
-            quantity REAL,
-            purchase_price REAL,
-            purchase_date TEXT,
-            current_weight REAL,
-            cost_basis REAL
-        )
-    """,
-
-    "portfolios": """
-        CREATE TABLE IF NOT EXISTS portfolios (
-            portfolio_id INTEGER PRIMARY KEY,
-            portfolio_name TEXT,
-            creation_date TEXT,
-            target_risk_level TEXT,
-            total_aum REAL,
-            strategy_type TEXT,
-            benchmark_index TEXT,
-            status TEXT
-        )
-    """,
-
-    "portfolio_performance": """
-        CREATE TABLE IF NOT EXISTS portfolio_performance (
-            performance_id INTEGER PRIMARY KEY,
-            portfolio_id INTEGER,
-            performance_date TEXT,
-            nav REAL,
-            total_return_1m REAL,
-            total_return_3m REAL,
-            total_return_6m REAL,
-            total_return_1y REAL,
-            volatility REAL,
-            sharpe_ratio REAL,
-            max_drawdown REAL
-        )
-    """,
-
-    "risk_metrics": """
-        CREATE TABLE IF NOT EXISTS risk_metrics (
-            risk_id INTEGER PRIMARY KEY,
-            portfolio_id INTEGER,
-            calculation_date TEXT,
-            var_95 REAL,
-            var_99 REAL,
-            cvar_95 REAL,
-            beta REAL,
-            correlation_sp500 REAL,
-            tracking_error REAL,
-            information_ratio REAL,
-            sortino_ratio REAL
-        )
-    """,
-
-    "sectors": """
-        CREATE TABLE IF NOT EXISTS sectors (
-            sector_id INTEGER PRIMARY KEY,
-            sector_name TEXT,
-            sector_description TEXT,
-            industry_group TEXT
-        )
-    """,
-
-    "securities": """
-        CREATE TABLE IF NOT EXISTS securities (
-            security_id INTEGER PRIMARY KEY,
-            symbol TEXT,
-            company_name TEXT,
-            asset_type TEXT,
-            sector_id INTEGER,
-            market_cap REAL,
-            current_price REAL,
-            currency TEXT,
-            exchange TEXT,
-            country TEXT,
-            listing_date TEXT,
-            maturity_date TEXT,
-            coupon_rate REAL
-        )
-    """,
-
-    "transactions": """
-        CREATE TABLE IF NOT EXISTS transactions (
-            transaction_id INTEGER PRIMARY KEY,
-            portfolio_id INTEGER,
-            security_id INTEGER,
-            transaction_type TEXT,
-            quantity REAL,
-            price REAL,
-            transaction_date TEXT,
-            fees REAL,
-            settlement_date TEXT,
-            notes TEXT
-        )
-    """
-}
+# Table creation order based on foreign-key dependencies
+TABLE_ORDER = [
+    "sectors",
+    "securities",
+    "benchmarks",
+    "portfolios",
+    "holdings",
+    "transactions",
+    "historical_prices",
+    "portfolio_performance",
+    "risk_metrics",
+]
 
 
 def load_csv(connection, table_name):
@@ -190,21 +80,22 @@ def load_csv(connection, table_name):
         return len(rows)
 
 
-def create_database():
-    connection = sqlite3.connect(DB_PATH)
+def create_database(target_db_path=None):
+    """
+    Initialize the SQLite database using database_schema.sql as the single source of truth,
+    enable foreign-key enforcement, and populate all nine tables in foreign-key dependency order.
+    """
+    db_file = target_db_path or DB_PATH
+    connection = sqlite3.connect(db_file)
 
     try:
-        # Create database tables.
-        for table_name, create_query in TABLES.items():
-            connection.execute(create_query)
+        # Enable foreign key constraint checking
+        connection.execute("PRAGMA foreign_keys = ON;")
 
-        # Apply the supplied indexes.
+        # Apply schema with full constraints, check constraints, foreign keys and indexes
         schema_path = BASE_DIR / "database_schema.sql"
-
         if not schema_path.is_file():
-            raise FileNotFoundError(
-                f"Schema file not found: {schema_path}"
-            )
+            raise FileNotFoundError(f"Schema file not found: {schema_path}")
 
         schema_sql = schema_path.read_text(encoding="utf-8")
         connection.executescript(schema_sql)
@@ -215,19 +106,19 @@ def create_database():
         print("DATABASE LOADING")
         print("----------------")
 
-        # Clear previous records.
-        for table_name in TABLES:
+        # Clear records in reverse dependency order to respect foreign keys
+        for table_name in reversed(TABLE_ORDER):
             connection.execute(f"DELETE FROM {table_name}")
 
-        # Load all CSV files.
-        for table_name in TABLES:
+        # Load all CSV files in dependency order
+        for table_name in TABLE_ORDER:
             count = load_csv(connection, table_name)
             print(f"{table_name}: {count} records loaded")
 
         connection.commit()
 
         print("\nDatabase created and loaded successfully!")
-        print(f"Database location: {DB_PATH}")
+        print(f"Database location: {db_file}")
 
     except Exception as error:
         connection.rollback()

@@ -59,7 +59,34 @@ MarketVue routes incoming queries through an integrated pipeline:
 
 ---
 
-## 3. Database Schema and Storage
+## 3. Repository File Directory & Descriptions
+
+The following table provides an exhaustive breakdown of every file in the repository, its purpose, and its architectural role:
+
+| File / Path | Category | Purpose and Technical Description |
+|:---|:---:|:---|
+| **`app.py`** | Application Frontend | Streamlit web interface for MarketVue. Handles user interaction, suggested query buttons, responsive data rendering, technical detail expanders, session-based usage counters (10-query limit with warning at 7), and zero-configuration cloud database initialization. |
+| **`portfolio_agent.py`** | Core Agent | Main orchestrator for natural-language query resolution. Implements the tool routing logic (`select_tool`), SQL generation prompt (`generate_sql`), dynamic reasoning synthesis (`generate_reasoning`), model failover across `ACTIVE_MODELS`, and response formatting (`format_response`). |
+| **`sql_tool.py`** | Data Retrieval Tool | Secure SQLite execution harness. Enforces read-only database connections (`?mode=ro`), keyword validation, low-level SQLite authorizer callbacks (blocking non-whitelisted tables and system catalogs), step execution boundaries, and row output limits (1,000 max rows). |
+| **`exposure_calculator.py`** | Quantitative Calculator | Deterministic sector allocation calculator. Performs Python-based mathematical aggregation of portfolio holdings strictly filtered for equity securities (`asset_type = 'Stock'`), returning sector exposure percentages, total equity weights, and position audit trails. |
+| **`database.py`** | Database Loader | Database setup and ingestion script. Uses `database_schema.sql` as the single source of truth, enables foreign key enforcement (`PRAGMA foreign_keys = ON;`), and populates all nine tables from CSV files in foreign-key dependency order within an atomic transaction. |
+| **`database_schema.sql`** | Database Schema | Definitive DDL schema defining all 9 tables, primary keys, foreign-key relationships, unique constraints, check constraints (`asset_type IN ('Stock', 'Bond')`), and composite indexes for query optimization. |
+| **`test_reliability.py`** | Offline Test Suite | 22 unit and integration tests verifying error classification, graceful failure isolation (preserving SQL/exposure results when reasoning is paused), SQL security barriers, and session limit counter logic without making live Gemini API calls. |
+| **`evaluate.py`** | Benchmark Evaluator | Automated evaluation harness for the official 10-question ground truth dataset. Compares agent-generated outputs against reference queries with numeric tolerance handling and ordering checks. |
+| **`evaluate_extended.py`** | Benchmark Evaluator | Automated evaluation harness for the extended 30-question test dataset across 6 quantitative portfolio research categories. |
+| **`ground_truth_dataset.json`**| Dataset | Official benchmark dataset containing 10 reference questions, expected tool selections, reference SQL queries, and expected answers. |
+| **`extended_test_dataset.json`**| Dataset | Extended evaluation dataset containing 30 diverse financial questions spanning fund metadata, holdings, risk, performance, transactions, and exposure. |
+| **`data/*.csv`** (9 files) | Seed Datasets | Raw financial datasets: `benchmarks.csv`, `historical_prices.csv`, `holdings.csv`, `portfolios.csv`, `portfolio_performance.csv`, `risk_metrics.csv`, `sectors.csv`, `securities.csv`, and `transactions.csv`. |
+| **`requirements.txt`** | Dependency Config | Declares runtime dependencies: `streamlit`, `google-genai`, `python-dotenv`, `pydantic`, `pandas`, and testing utilities. |
+| **`.streamlit/config.toml`** | Deployment Config | Streamlit server and theme configuration (headless execution, custom porting, institutional color palette). |
+| **`.gitignore`** | Git Configuration | Excludes local virtual environments (`venv/`), environment secrets (`.env`), cached binaries (`__pycache__/`), and local SQLite database files (`portfolio.db`). |
+| **`README.md`** | Project Overview | High-level repository documentation providing architecture overviews, installation guides, evaluation summaries, and usage limit details. |
+| **`docs/PROJECT_DOCUMENTATION.md`** | Technical Documentation | In-depth technical specification (this document) covering system architecture, database design, file roles, and evaluation methodology. |
+| **`docs/ORIGINAL_ASSIGNMENT.md`** | Assignment Reference | Original specifications and assignment prompt provided for the project. |
+
+---
+
+## 4. Database Schema and Storage
 
 The SQLite database (`portfolio.db`) is initialized from normalized CSV files located in `data/`:
 
@@ -77,7 +104,7 @@ The SQLite database (`portfolio.db`) is initialized from normalized CSV files lo
 
 ---
 
-## 4. Implemented Features & Modules
+## 5. Implemented Features & Modules
 
 ### A. SQL Query Engine (`sql_tool.py`)
 - **Read-Only Mode**: SQLite connections are opened using `file:portfolio.db?mode=ro`.
@@ -92,7 +119,7 @@ The SQLite database (`portfolio.db`) is initialized from normalized CSV files lo
 
 ### C. Agent Orchestration (`portfolio_agent.py`)
 - **Dynamic Entity Mapping**: Queries database fund names dynamically to accurately match informal user references.
-- **Model Redundancy**: Configured with failover handling across `gemini-2.5-flash` and `gemini-flash-latest`.
+- **Model Redundancy**: Configured with failover handling across `ACTIVE_MODELS`: `gemini-3.5-flash`, `gemini-3.1-flash-lite`, and `gemini-flash-latest`.
 - **Structured Pydantic Schemas**: Enforces strongly-typed responses (`ToolDecision`, `SQLResponse`, `ReasoningResponse`).
 - **Dynamic Reasoning**: Evaluates results to generate executive commentary and clear explanations for empty queries.
 
@@ -104,30 +131,33 @@ The SQLite database (`portfolio.db`) is initialized from normalized CSV files lo
 
 ---
 
-## 5. Session Usage Limits & API Protection
+## 6. Session Usage Limits & API Protection
 
-To prevent quota depletion in public cloud environments, MarketVue enforces session guardrails:
+To mitigate rapid exhaustion of shared API keys in public deployments, MarketVue implements client-side session guardrails:
 
-- **10-Query Session Limit**: Users are allocated up to 10 AI-assisted queries per session.
+- **10-Query Session Limit**: Users are limited to 10 AI-powered queries per Streamlit browser session.
 - **Proactive Warnings**: A warning banner appears after 7 queries indicating remaining calls.
-- **Graceful Blocking**: When the 10-query limit is reached, AI inputs are disabled while access to database records, charts, and historical answers is maintained.
-- **In-App Explanations**: Interactive popovers explain the policy to users upfront.
+- **Graceful Blocking**: When the 10-query limit is reached, new AI inputs are paused while full access to dashboard statistics, portfolio dataset tables, and previously generated results is maintained.
+- **Limitations**: This is an in-memory session-state control that prevents individual browser sessions from generating excessive API calls. It does not provide global multi-tenant quota management across independent concurrent visitors.
 
 ---
 
-## 6. Verification and Evaluation Results
+## 7. Verification and Evaluation Results
 
-The application has been verified across official and extended benchmark suites:
+The application's analytical accuracy and software reliability have been benchmarked across both automated functional evaluations and offline test suites:
 
 ### Benchmark Summary
-- **Official Benchmark (`evaluate.py`)**: **10/10 Passed (100%)**
-- **Extended Evaluation (`evaluate_extended.py`)**: **26/30 Passed (86.7%)**
-- **Reliability & Security Test Suite (`test_reliability.py`)**: **22/22 Tests Passing**
-- **Live Pre-Deployment Verification Run**: **10/10 Passed (100%)**
+- **Official Benchmark (`evaluate.py`)**: **10/10 Passed (100% recorded accuracy)** covering natural-language SQL generation, CTE aggregations, and deterministic sector exposure.
+- **Extended Evaluation (`evaluate_extended.py`)**: **26/30 Passed (86.7% recorded accuracy)** across 6 distinct quantitative portfolio research categories.
+- **Reliability & Security Test Suite (`test_reliability.py`)**: **22/22 Tests Passing** (offline execution with mocked API calls), validating:
+  - Error classification across quota exhaustion, authentication failures, network timeouts, and missing credentials.
+  - Graceful degradation (preserving underlying database records and exposure calculations when reasoning is unavailable).
+  - SQL security barriers (rejection of non-SELECT statements, multi-statements, and system catalog probing).
+  - Session usage state counters and threshold enforcement (warning at 7 queries, blocking at 10 queries).
 
 ---
 
-## 7. Setup and Execution
+## 8. Setup and Execution
 
 ### Local Setup
 ```bash
