@@ -281,7 +281,20 @@ with st.sidebar:
     st.markdown(f"  <small style='color: #64748b;'>{html.escape(db_status_msg)}</small>", unsafe_allow_html=True)
     st.markdown(f"- **AI Reasoning Service:**")
     st.markdown(f"  <small style='color: #64748b;'>{html.escape(st.session_state.gemini_status)}</small>", unsafe_allow_html=True)
-    st.markdown(f"- **Session Query Usage:** {st.session_state.question_count} / {MAX_SESSION_QUESTIONS}")
+    usage_col1, usage_col2 = st.columns([3, 1])
+    with usage_col1:
+        st.markdown(f"- **Session Query Usage:** {st.session_state.question_count} / {MAX_SESSION_QUESTIONS}")
+    with usage_col2:
+        with st.popover("ℹ️", help="Click to see session query limit details"):
+            st.markdown("#### Session Query Limit Policy")
+            st.markdown(
+                f"Each session is allocated a maximum of **{MAX_SESSION_QUESTIONS} AI-powered questions**.\n\n"
+                "**Why is this limit enforced?**\n"
+                "- MarketVue is hosted as a public showcase application.\n"
+                "- Repetitive or unnecessary AI calls can rapidly exhaust the shared Gemini API quota, preventing other visitors from exploring the agent.\n"
+                "- A warning appears after **7 queries**; AI query generation is disabled after **10 queries**.\n\n"
+                "All local database calculations, portfolio tables, and previous question results remain fully accessible even after reaching the limit."
+            )
 
     if "Quota Exhausted" in st.session_state.gemini_status:
         st.warning("Gemini API free-tier quota is currently exhausted. Natural-language AI reasoning is temporarily paused; direct database queries remain operational.")
@@ -355,10 +368,23 @@ elif st.session_state.question_count >= WARNING_THRESHOLD:
 
 
 # --------------------------------------------------
-# Suggested Query Pills
+# Suggested Query Pills & Usage Info Notice
 # --------------------------------------------------
 
-st.markdown("**Suggested Queries**")
+suggested_hdr_col, info_btn_col = st.columns([5, 1])
+with suggested_hdr_col:
+    st.markdown("**Suggested Queries**")
+with info_btn_col:
+    with st.popover("ℹ️ Query Limit", help="Click to view policy on session query limits"):
+        st.markdown("#### Session Query Limit Policy")
+        st.markdown(
+            f"Each user session allows up to **{MAX_SESSION_QUESTIONS} AI queries**.\n\n"
+            "**Why is this limit enforced?**\n"
+            "- MarketVue is hosted on a public demonstration environment.\n"
+            "- Excessive or unnecessary queries quickly exhaust the shared Gemini API quota, which blocks other visitors from testing.\n"
+            "- A warning is shown after **7 questions**, and AI questions are paused after **10 questions**.\n\n"
+            "You can always view all database tables, previous question results, and calculations even after reaching the limit."
+        )
 
 example_col1, example_col2, example_col3, example_col4 = st.columns(4)
 
