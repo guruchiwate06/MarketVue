@@ -26,9 +26,14 @@ BASE_DIR = Path(__file__).resolve().parent
 # Environment & Deployment Secrets Support
 # --------------------------------------------------
 
+from dotenv import load_dotenv
+
+# Load local environment variables from .env
+load_dotenv()
+
 # Silently load API key from Streamlit secrets if deployed
 try:
-    if "GEMINI_API_KEY" in st.secrets:
+    if hasattr(st, "secrets") and "GEMINI_API_KEY" in st.secrets and st.secrets["GEMINI_API_KEY"]:
         os.environ["GEMINI_API_KEY"] = st.secrets["GEMINI_API_KEY"]
 except Exception:
     pass
@@ -197,11 +202,18 @@ if "conversation_history" not in st.session_state:
 if "pending_question" not in st.session_state:
     st.session_state.pending_question = None
 
+current_key_present = bool(os.getenv("GEMINI_API_KEY"))
+
 if "gemini_status" not in st.session_state:
-    has_key = bool(os.getenv("GEMINI_API_KEY"))
-    if has_key:
+    if current_key_present:
         st.session_state.gemini_status = "Standby (Key detected, unverified)"
     else:
+        st.session_state.gemini_status = "Unconfigured (API key missing)"
+else:
+    # Dynamically update if key was added or removed
+    if current_key_present and "Unconfigured" in st.session_state.gemini_status:
+        st.session_state.gemini_status = "Standby (Key detected, unverified)"
+    elif not current_key_present:
         st.session_state.gemini_status = "Unconfigured (API key missing)"
 
 if "question_count" not in st.session_state:
@@ -225,6 +237,9 @@ with st.sidebar:
 
     if "Quota Exhausted" in st.session_state.gemini_status:
         st.warning("Gemini API free-tier quota is currently exhausted. Natural-language AI reasoning is temporarily paused; direct database queries remain operational.")
+
+    if not current_key_present:
+        st.info("API Key Setup: To enable AI reasoning, configure GEMINI_API_KEY in your local .env file or Streamlit Cloud Secrets.")
 
     st.markdown("---")
     st.markdown("### Portfolio Dataset")
